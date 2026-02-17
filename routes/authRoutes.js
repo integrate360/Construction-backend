@@ -16,19 +16,14 @@ import roleMiddleware from '../middleware/roleMiddleware.js';
 
 const router = express.Router();
 
-// Public
 router.post('/register', registerUser);
 router.post('/login', loginUser);
-
-// Private (Logged-in user)
-router.get('/me', authMiddleware, getMyProfile);
-router.put('/me', authMiddleware, updateMyProfile);
+router.get('/get/me', authMiddleware, getMyProfile);
+router.put('/update/me', authMiddleware, updateMyProfile);
 router.put('/change-password', authMiddleware, changePassword);
-
-// Admin only
-router.get('/', authMiddleware, roleMiddleware('super_admin'), getAllUsers);
-router.get('/:id', authMiddleware, roleMiddleware('super_admin'), getUserById);
-router.put('/:id', authMiddleware, roleMiddleware('super_admin'), updateUserByAdmin);
-router.delete('/:id', authMiddleware, roleMiddleware('super_admin'), deactivateUser);
+router.get('/getallusers', authMiddleware, roleMiddleware('super_admin'), getAllUsers);
+router.get('/get-by/:id', authMiddleware, roleMiddleware('super_admin'), getUserById);
+router.put('/update-user/:id', authMiddleware, roleMiddleware('super_admin'), updateUserByAdmin);
+router.delete('/delete-user/:id', authMiddleware, roleMiddleware('super_admin'), deactivateUser);
 
 export default router;
