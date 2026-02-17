@@ -21,24 +21,22 @@ const UserSchema = new mongoose.Schema(
       minlength: 6,
       select: false,
     },
-
     profilePicture: {
       type: String,
       default:
         "https://www.gravatar.com/avatar/00000000000000000000000000000000?d=mp&f=y",
     },
-
     role: {
       type: String,
       enum: ["super_admin", "site_manager", "accountant", "personal"],
       default: "personal",
     },
-    assignedSites: [
-      {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "Project",
-      },
-    ],
+    // assignedSites: [
+    //   {
+    //     type: mongoose.Schema.Types.ObjectId,
+    //     ref: "Project",
+    //   },
+    // ],
     isActive: {
       type: Boolean,
       default: true,
@@ -49,20 +47,37 @@ const UserSchema = new mongoose.Schema(
   },
 );
 
-UserSchema.pre("save", async function (next) {
-  if (!this.isModified("password")) return next();
-  this.password = await bcrypt.hash(this.password, 10);
-  next();
+// Fixed pre-save middleware - Using async function without next parameter
+UserSchema.pre("save", async function () {
+  // Only hash the password if it's modified
+  if (!this.isModified("password")) return;
+
+  try {
+    // Hash the password with bcrypt
+    const salt = await bcrypt.genSalt(10);
+    this.password = await bcrypt.hash(this.password, salt);
+  } catch (error) {
+    throw new Error("Password hashing failed");
+  }
 });
 
+// Method to compare entered password with hashed password
 UserSchema.methods.matchPassword = async function (enteredPassword) {
   return await bcrypt.compare(enteredPassword, this.password);
 };
 
+// Method to generate JWT token
 UserSchema.methods.getSignedJwtToken = function () {
-  return jwt.sign({ id: this._id, role: this.role }, process.env.JWT_SECRET, {
-    expiresIn: process.env.JWT_EXPIRE || "365d",
-  });
+  return jwt.sign(
+    {
+      id: this._id,
+      role: this.role,
+    },
+    process.env.JWT_SECRET,
+    {
+      expiresIn: process.env.JWT_EXPIRE || "365d",
+    },
+  );
 };
 
 const User = mongoose.model("User", UserSchema);
