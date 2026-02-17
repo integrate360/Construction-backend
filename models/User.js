@@ -31,12 +31,12 @@ const UserSchema = new mongoose.Schema(
       enum: ["super_admin", "site_manager", "accountant", "personal"],
       default: "personal",
     },
-    // assignedSites: [
-    //   {
-    //     type: mongoose.Schema.Types.ObjectId,
-    //     ref: "Project",
-    //   },
-    // ],
+    assignedSites: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Project",
+      },
+    ],
     isActive: {
       type: Boolean,
       default: true,
