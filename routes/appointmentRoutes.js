@@ -17,15 +17,14 @@ import {
   getAgendaView,
 } from "../controllers/appointmentController.js";
 import authMiddleware from "../middleware/authmiddleware.js";
-import roleMiddleware from "../middleware/roleMiddleware.js";
+
 const router = express.Router();
 router.use(authMiddleware);
 
-router.get("/stats", roleMiddleware(["super_admin"]), getAppointmentStats);
+router.get("/stats", getAppointmentStats);
 
 router.get(
   "/upcoming",
-  roleMiddleware(["super_admin"]),
   getUpcomingAppointments,
 );
 
