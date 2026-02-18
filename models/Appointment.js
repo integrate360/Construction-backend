@@ -35,14 +35,14 @@ const AppointmentSchema = new mongoose.Schema(
     },
 
     project: {
-      type: Schema.Types.ObjectId,
+      type: mongoose.Schema.Types.ObjectId,
       ref: "Project",
       index: true,
     },
 
     attendees: [
       {
-        type: Schema.Types.ObjectId,
+        type: mongoose.Schema.Types.ObjectId,
         ref: "User",
       },
     ],
@@ -55,7 +55,7 @@ const AppointmentSchema = new mongoose.Schema(
     },
 
     createdBy: {
-      type: Schema.Types.ObjectId,
+      type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
       index: true,
@@ -74,4 +74,4 @@ const AppointmentSchema = new mongoose.Schema(
 
 AppointmentSchema.index({ meetingTime: 1, status: 1 });
 
-export default model("Appointment", AppointmentSchema);
+export default mongoose.model("Appointment", AppointmentSchema);

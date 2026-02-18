@@ -7,6 +7,7 @@ import connectDB from "./config/db.js";
 import authRoutes from "./routes/authRoutes.js";
 import attributeRoutes from "./routes/attributeRoutes.js";
 import attributeSetRoutes from "./routes/attributeSetRoutes.js";
+import appointmentRoutes from "./routes/appointmentRoutes.js";
 
 dotenv.config({ quiet: true });
 
@@ -35,6 +36,7 @@ app.get("/api/health", (req, res) => {
 app.use("/api/auth", authRoutes);
 app.use("/api/attribute", attributeRoutes);
 app.use("/api/attribute-sets", attributeSetRoutes);
+app.use("/api/appointments", appointmentRoutes);
 
 
 // 404 Handler
