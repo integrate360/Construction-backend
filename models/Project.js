@@ -1,73 +1,203 @@
 import mongoose from "mongoose";
 
-const PhaseSchema = new mongoose.Schema({
-  phaseNumber: { type: Number, required: true, enum: [1, 2, 3, 4] },
-  phaseName: {
-    type: String,
-    enum: ["FOUNDATION", "STRUCTURE", "FINISHING", "HANDOVER"],
-    required: true,
-  },
-  completionPercentage: { type: Number, default: 0, min: 0, max: 100 },
-  costsIncurred: { type: Number, default: 0 },
-  timeSpentDays: { type: Number, default: 0 },
-  startDate: { type: Date },
-  endDate: { type: Date },
-  status: {
-    type: String,
-    enum: ["pending", "in_progress", "completed"],
-    default: "pending",
-  },
-  notes: { type: String },
-});
-
-const ProjectSchema = new mongoose.Schema(
+const PhaseSchema = new mongoose.Schema(
   {
-    projectName: {
-      type: String,
-      required: [true, "Project name is required"],
-      trim: true,
+    phaseNumber: {
+      type: Number,
+      required: true,
+      enum: [1, 2, 3, 4],
     },
+    phaseName: {
+      type: String,
+      required: true,
+      enum: ["FOUNDATION", "STRUCTURE", "FINISHING", "HANDOVER"],
+    },
+    completionPercentage: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 100,
+    },
+    costsIncurred: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    timeSpentDays: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    startDate: Date,
+    endDate: Date,
+    status: {
+      type: String,
+      enum: ["pending", "in_progress", "completed"],
+      default: "pending",
+    },
+    notes: String,
+  },
+  { _id: false },
+);
+
+/* ---------------- Project Schema ---------------- */
+const ProjectSchema = new Schema(
+  {
+    /* ---------- Client ---------- */
     client: {
-      type: mongoose.Schema.Types.ObjectId,
+      type: Schema.Types.ObjectId,
       ref: "Client",
       required: true,
+      index: true,
     },
-    totalBudget: { type: Number, required: [true, "Budget is required"] },
-    boqValue: { type: Number, default: 0 },
-    area: { type: String },
+        attributeSet: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "AttributeSet",
+    },
+
+    /* ---------- Site Information ---------- */
+    siteInfo: {
+      siteName: { type: String, trim: true },
+      address: String,
+      city: String,
+      state: String,
+      pincode: String,
+      latitude: Number,
+      longitude: Number,
+      landAreaSqFt: { type: Number, min: 0 },
+      builtUpAreaSqFt: { type: Number, min: 0 },
+      soilType: String,
+      siteAccess: {
+        type: String,
+        enum: ["easy", "moderate", "difficult"],
+      },
+    },
+
+    /* ---------- Project Details ---------- */
+    area: String,
     type: {
       type: String,
       enum: ["residential", "commercial", "industrial", "infrastructure"],
+      required: true,
     },
-    architectName: { type: String },
+
+    /* ---------- Professionals ---------- */
+    architectName: String,
+    structuralEngineer: String,
+    contractorName: String,
+    consultantName: String,
+
+    /* ---------- Approvals ---------- */
     approvalStatus: {
       type: String,
       enum: ["pending", "approved", "rejected"],
       default: "pending",
     },
-    planningDetails: { type: String },
-    startDate: { type: Date, required: true },
-    endDate: { type: Date },
-    currentPhase: { type: Number, enum: [1, 2, 3, 4], default: 1 },
-    completionPercentage: { type: Number, default: 0, min: 0, max: 100 },
+    approvals: {
+      buildingPlan: { type: Boolean, default: false },
+      environmentalClearance: { type: Boolean, default: false },
+      fireSafety: { type: Boolean, default: false },
+      commencementCertificate: { type: Boolean, default: false },
+      occupancyCertificate: { type: Boolean, default: false },
+    },
+
+    /* ---------- Utilities ---------- */
+    utilities: {
+      electricity: { type: Boolean, default: false },
+      waterSupply: { type: Boolean, default: false },
+      drainage: { type: Boolean, default: false },
+      internet: { type: Boolean, default: false },
+    },
+
+    /* ---------- Financials ---------- */
+    totalBudget: {
+      type: Number,
+      required: true,
+      min: 0,
+    },
+    boqValue: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    estimatedCost: {
+      type: Number,
+      min: 0,
+    },
+    actualCost: {
+      type: Number,
+      min: 0,
+    },
+    paymentMode: {
+      type: String,
+      enum: ["cash", "bank", "loan"],
+    },
+
+    /* ---------- Timeline ---------- */
+    startDate: {
+      type: Date,
+      required: true,
+    },
+    endDate: Date,
+    expectedCompletionDate: Date,
+
+    /* ---------- Progress ---------- */
+    currentPhase: {
+      type: Number,
+      enum: [1, 2, 3, 4],
+      default: 1,
+    },
+    completionPercentage: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 100,
+    },
     status: {
       type: String,
       enum: ["planning", "active", "on_hold", "completed", "cancelled"],
       default: "planning",
     },
-    phases: [PhaseSchema],
-    siteManagers: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
-    location: { type: String },
-    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+
+    phases: {
+      type: [PhaseSchema],
+      default: [],
+    },
+
+    /* ---------- Team ---------- */
+    siteManagers: [
+      {
+        type: Schema.Types.ObjectId,
+        ref: "User",
+      },
+    ],
+    createdBy: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+    },
+
+    /* ---------- Misc ---------- */
+    risks: {
+      type: [String],
+      default: [],
+    },
+    remarks: String,
+    location: String,
   },
   { timestamps: true },
 );
 
+/* ---------------- Methods ---------------- */
 ProjectSchema.methods.calculateCompletion = function () {
-  if (!this.phases || this.phases.length === 0) return 0;
-  const total = this.phases.reduce((sum, p) => sum + p.completionPercentage, 0);
+  if (!this.phases.length) return 0;
+
+  const total = this.phases.reduce(
+    (sum, phase) => sum + (phase.completionPercentage || 0),
+    0,
+  );
+
   return Math.round(total / this.phases.length);
 };
 
-const Project = mongoose.model("Project", ProjectSchema);
-export default Project;
+export default model("Project", ProjectSchema);

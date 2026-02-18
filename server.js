@@ -2,11 +2,11 @@ import dotenv from "dotenv";
 import express from "express";
 import cors from "cors";
 import morgan from "morgan";
-import swaggerUi from "swagger-ui-express";
-
+import swaggerUI from "./swagger/swaggerUI.js";
 import connectDB from "./config/db.js";
-import swaggerSpec from "./config/swagger.js";
 import authRoutes from "./routes/authRoutes.js";
+import attributeRoutes from "./routes/attributeRoutes.js";
+// import attributeSetRoutes from "./routes/attributeSetRoutes.js";
 
 dotenv.config({ quiet: true });
 
@@ -21,8 +21,7 @@ if (process.env.NODE_ENV === "development") {
   app.use(morgan("dev"));
 }
 
-// 🔥 Swagger Docs
-app.use("/api/docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+swaggerUI(app);
 
 // Health Check
 app.get("/api/health", (req, res) => {
@@ -34,6 +33,8 @@ app.get("/api/health", (req, res) => {
 
 // Routes
 app.use("/api/auth", authRoutes);
+app.use("/api/attribute", attributeRoutes);
+// app.use("/api/attribute-sets", attributeSetRoutes);
 
 // 404 Handler
 app.use((req, res) => {

@@ -1,15 +1,77 @@
-const mongoose = require('mongoose');
+import mongoose from "mongoose";
 
-const AppointmentSchema = new mongoose.Schema({
-  title:       { type: String, required: [true, 'Title is required'] },
-  location:    { type: String },
-  meetingTime: { type: Date, required: [true, 'Meeting time is required'] },
-  reminderTime:{ type: Date },
-  notes:       { type: String },
-  project:     { type: mongoose.Schema.Types.ObjectId, ref: 'Project' },
-  attendees:   [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
-  status:      { type: String, enum: ['scheduled', 'completed', 'cancelled'], default: 'scheduled' },
-  createdBy:   { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-}, { timestamps: true });
+const AppointmentSchema = new mongoose.Schema(
+  {
+    title: {
+      type: String,
+      required: true,
+      trim: true,
+    },
 
-module.exports = mongoose.model('Appointment', AppointmentSchema);
+    location: {
+      type: String,
+      trim: true,
+    },
+
+    meetingTime: {
+      type: Date,
+      required: true,
+      index: true,
+    },
+
+    reminderTime: {
+      type: Date,
+      validate: {
+        validator(value) {
+          return !value || value < this.meetingTime;
+        },
+        message: "Reminder time must be before meeting time",
+      },
+    },
+
+    notes: {
+      type: String,
+      trim: true,
+    },
+
+    project: {
+      type: Schema.Types.ObjectId,
+      ref: "Project",
+      index: true,
+    },
+
+    attendees: [
+      {
+        type: Schema.Types.ObjectId,
+        ref: "User",
+      },
+    ],
+
+    status: {
+      type: String,
+      enum: ["scheduled", "completed", "cancelled"],
+      default: "scheduled",
+      index: true,
+    },
+
+    createdBy: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+      index: true,
+    },
+
+    isActive: {
+      type: Boolean,
+      default: true,
+    },
+  },
+  {
+    timestamps: true,
+    versionKey: false,
+  }
+);
+
+AppointmentSchema.index({ meetingTime: 1, status: 1 });
+
+export default model("Appointment", AppointmentSchema);
