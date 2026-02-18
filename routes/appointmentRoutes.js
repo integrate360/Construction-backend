@@ -12,6 +12,9 @@ import {
   getAppointmentStats,
   addAttendee,
   removeAttendee,
+  checkAvailability,
+  getCalendarAppointments,
+  getAgendaView,
 } from "../controllers/appointmentController.js";
 import authMiddleware from "../middleware/authmiddleware.js";
 import roleMiddleware from "../middleware/roleMiddleware.js";
@@ -45,5 +48,8 @@ router.patch("/completeAppointment/:id/complete", completeAppointment);
 router.post("/addAttendee/:id/attendees", addAttendee);
 
 router.delete("/removeAttendee/:id/attendees/:attendee", removeAttendee);
+router.get("/calendar", getCalendarAppointments); 
+router.get("/agenda", getAgendaView); 
+router.get("/check-availability", checkAvailability); 
 
 export default router;
