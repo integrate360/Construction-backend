@@ -740,42 +740,36 @@ export const removeAttendee = async (req, res) => {
 
 export const getCalendarAppointments = async (req, res) => {
   try {
-    const { start, end, view = "month" } = req.query;
+    const { start, end, view = "month", status } = req.query;
 
-    if (!start || !end) {
-      return res.status(400).json({
-        success: false,
-        message: "Start and end dates are required for calendar view",
-      });
-    }
-
-    const startDate = new Date(start);
-    const endDate = new Date(end);
-
-    // Build filter
     const filter = {
       isActive: true,
-      $or: [
-        // Appointments that overlap with the date range
+    };
+
+    // Date range filter (ONLY if start & end are provided)
+    if (start && end) {
+      const startDate = new Date(start);
+      const endDate = new Date(end);
+
+      filter.$or = [
         {
           startTime: { $lte: endDate },
           endTime: { $gte: startDate },
         },
-        // All-day or single-day appointments
         {
           startTime: { $gte: startDate, $lte: endDate },
         },
-      ],
-    };
+      ];
+    }
 
-    // If user is not super_admin, show only their appointments
+    // Role-based filter
     if (req.user.role !== "super_admin") {
       filter.createdBy = req.user._id;
     }
 
     // Optional status filter
-    if (req.query.status) {
-      filter.status = req.query.status;
+    if (status) {
+      filter.status = status;
     }
 
     const appointments = await Appointment.find(filter)
@@ -783,7 +777,6 @@ export const getCalendarAppointments = async (req, res) => {
       .populate("createdBy", "name email profilePic")
       .sort({ startTime: 1 });
 
-    // Format appointments for calendar display
     const calendarEvents = appointments.map((appointment) => ({
       id: appointment._id,
       title: appointment.title,
@@ -807,11 +800,9 @@ export const getCalendarAppointments = async (req, res) => {
       success: true,
       data: calendarEvents,
       total: calendarEvents.length,
-      range: {
-        start: startDate,
-        end: endDate,
-        view,
-      },
+      range: start && end
+        ? { start, end, view }
+        : null,
     });
   } catch (error) {
     res.status(500).json({
@@ -820,6 +811,7 @@ export const getCalendarAppointments = async (req, res) => {
     });
   }
 };
+
 
 // Helper function to get color based on status
 const getStatusColor = (status) => {
