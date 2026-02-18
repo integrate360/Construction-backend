@@ -11,27 +11,22 @@ export const createAttributeSet = async (req, res) => {
 
     res.status(201).json({
       success: true,
-      message: "Attribute set created successfully",
       data: attributeSet,
     });
   } catch (error) {
-    res.status(400).json({
+    res.status(500).json({
       success: false,
       message: error.message,
     });
   }
 };
 
-/* ---------------- Get All Attribute Sets ---------------- */
 export const getAllAttributeSets = async (req, res) => {
   try {
-    const attributeSets = await AttributeSet.find()
-      .populate("attributes")
-      .sort({ createdAt: -1 });
+    const attributeSets = await AttributeSet.find().populate("attributes");
 
     res.status(200).json({
       success: true,
-      count: attributeSets.length,
       data: attributeSets,
     });
   } catch (error) {
@@ -42,11 +37,10 @@ export const getAllAttributeSets = async (req, res) => {
   }
 };
 
-/* ---------------- Get Attribute Set By ID ---------------- */
 export const getAttributeSetById = async (req, res) => {
   try {
     const attributeSet = await AttributeSet.findById(req.params.id).populate(
-      "attributes"
+      "attributes",
     );
 
     if (!attributeSet) {
@@ -61,23 +55,20 @@ export const getAttributeSetById = async (req, res) => {
       data: attributeSet,
     });
   } catch (error) {
-    res.status(400).json({
+    res.status(500).json({
       success: false,
-      message: "Invalid Attribute Set ID",
+      message: error.message,
     });
   }
 };
 
-/* ---------------- Update Attribute Set ---------------- */
 export const updateAttributeSet = async (req, res) => {
   try {
-    const { name, attributes } = req.body;
-
     const attributeSet = await AttributeSet.findByIdAndUpdate(
       req.params.id,
-      { name, attributes },
-      { new: true, runValidators: true }
-    ).populate("attributes");
+      req.body,
+      { new: true, runValidators: true },
+    );
 
     if (!attributeSet) {
       return res.status(404).json({
@@ -88,17 +79,15 @@ export const updateAttributeSet = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      message: "Attribute set updated successfully",
       data: attributeSet,
     });
   } catch (error) {
-    res.status(400).json({
+    res.status(500).json({
       success: false,
       message: error.message,
     });
   }
 };
-
 
 export const deleteAttributeSet = async (req, res) => {
   try {
@@ -116,9 +105,9 @@ export const deleteAttributeSet = async (req, res) => {
       message: "Attribute set deleted successfully",
     });
   } catch (error) {
-    res.status(400).json({
+    res.status(500).json({
       success: false,
-      message: "Invalid Attribute Set ID",
+      message: error.message,
     });
   }
 };
