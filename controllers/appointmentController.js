@@ -550,7 +550,6 @@ export const getUpcomingAppointments = async (req, res) => {
         { isActive: true },
         { status: "scheduled" },
         { meetingTime: { $gte: new Date(), $lte: endDate } },
-        { createdBy: req.user._id }, // Only show appointments created by the user
       ],
     })
       .populate("project", "name")
