@@ -156,10 +156,7 @@ export const loginUser = async (req, res, next) => {
 
 export const getMyProfile = async (req, res, next) => {
   try {
-    const user = await User.findById(req.user.id).populate(
-      "assignedSites",
-      "name location status",
-    );
+    const user = await User.findById(req.user.id);
 
     if (!user) {
       return res.status(404).json({
@@ -323,21 +320,13 @@ export const getAllUsers = async (req, res, next) => {
       sortOrder = "desc",
     } = req.query;
 
-    // Build filter object
     const filter = {};
-
-    // Role filter
     if (role) filter.role = role;
-
-    // Status filter
     if (isActive !== undefined) filter.isActive = isActive === "true";
-
-    // Search functionality (search in name, email, phoneNumber, address, and gstNumber)
     if (search) {
       filter.$or = [
         { name: { $regex: search, $options: "i" } },
         { email: { $regex: search, $options: "i" } },
-        { phoneNumber: { $regex: search, $options: "i" } },
         { address: { $regex: search, $options: "i" } },
         { gstNumber: { $regex: search, $options: "i" } },
       ];
@@ -354,8 +343,8 @@ export const getAllUsers = async (req, res, next) => {
       .select("-password")
       .sort(sort)
       .skip(skip)
-      .limit(limitNum)
-      .populate("assignedSites", "name location status");
+      .limit(limitNum);
+    // .populate("assignedSites", "name location status");
 
     const totalUsers = await User.countDocuments(filter);
 
