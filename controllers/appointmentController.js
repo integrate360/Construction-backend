@@ -5,18 +5,18 @@ export const createAppointment = async (req, res) => {
   try {
     const {
       title,
-      description, // Added
+      description,
       location,
-      startTime, // Changed from meetingTime
-      endTime,   // Added
+      startTime,
+      endTime,
       reminderTime,
       notes,
       project,
       attendees,
     } = req.body;
 
-    // Validate times
     const now = new Date();
+
     if (new Date(startTime) < now) {
       return res.status(400).json({
         success: false,
@@ -31,29 +31,25 @@ export const createAppointment = async (req, res) => {
       });
     }
 
-    // Check for conflicts
+    if (reminderTime && new Date(reminderTime) >= new Date(startTime)) {
+      return res.status(400).json({
+        success: false,
+        message: "Reminder time must be before start time",
+      });
+    }
+
     const conflict = await Appointment.findOne({
       isActive: true,
-      status: { $in: ['scheduled', 'rescheduled'] },
+      status: { $in: ["scheduled", "rescheduled"] },
       createdBy: req.user._id,
-      $or: [
-        {
-          startTime: { $lt: new Date(endTime) },
-          endTime: { $gt: new Date(startTime) }
-        }
-      ]
+      startTime: { $lt: new Date(endTime) },
+      endTime: { $gt: new Date(startTime) },
     });
 
     if (conflict) {
       return res.status(409).json({
         success: false,
         message: "Time slot conflicts with an existing appointment",
-        conflict: {
-          id: conflict._id,
-          title: conflict.title,
-          startTime: conflict.startTime,
-          endTime: conflict.endTime
-        }
       });
     }
 
@@ -77,7 +73,7 @@ export const createAppointment = async (req, res) => {
     res.status(201).json({
       success: true,
       data: populatedAppointment,
-      message: "Appointment created successfully"
+      message: "Appointment created successfully",
     });
   } catch (error) {
     res.status(500).json({
@@ -86,6 +82,7 @@ export const createAppointment = async (req, res) => {
     });
   }
 };
+
 
 export const getAppointments = async (req, res) => {
   try {
@@ -137,9 +134,9 @@ export const getAppointments = async (req, res) => {
       ];
     }
 
-    // If user is not admin, show only appointments they created
+    // If user is not super_admin, show only appointments they created
     // Note: Since attendees are strings (names), we can't filter by user ID
-    if (req.user.role !== "admin") {
+    if (req.user.role !== "super_admin") {
       filter.createdBy = req.user._id;
     }
 
@@ -195,7 +192,7 @@ export const getAppointmentById = async (req, res) => {
     // Check if user has access to this appointment (only creator can view)
     // Since attendees are strings (names), we can't check by user ID
     if (
-      req.user.role !== "admin" &&
+      req.user.role !== "super_admin" &&
       appointment.createdBy._id.toString() !== req.user._id.toString()
     ) {
       return res.status(403).json({
@@ -220,8 +217,10 @@ export const updateAppointment = async (req, res) => {
   try {
     const {
       title,
+      description,
       location,
-      meetingTime,
+      startTime,
+      endTime,
       reminderTime,
       notes,
       project,
@@ -238,9 +237,9 @@ export const updateAppointment = async (req, res) => {
       });
     }
 
-    // Check if user has permission to update (createdBy only, or admin)
+    // Permission check
     if (
-      req.user.role !== "admin" &&
+      req.user.role !== "super_admin" &&
       appointment.createdBy.toString() !== req.user._id.toString()
     ) {
       return res.status(403).json({
@@ -249,35 +248,59 @@ export const updateAppointment = async (req, res) => {
       });
     }
 
-    // Validate meeting time if being updated
-    if (meetingTime && new Date(meetingTime) < new Date()) {
+    // Time validation
+    const newStartTime = startTime ? new Date(startTime) : appointment.startTime;
+    const newEndTime = endTime ? new Date(endTime) : appointment.endTime;
+
+    if (newStartTime < new Date()) {
       return res.status(400).json({
         success: false,
-        message: "Meeting time must be in the future",
+        message: "Start time must be in the future",
       });
     }
 
-    // Update appointment
+    if (newEndTime <= newStartTime) {
+      return res.status(400).json({
+        success: false,
+        message: "End time must be after start time",
+      });
+    }
+
+    if (reminderTime && new Date(reminderTime) >= newStartTime) {
+      return res.status(400).json({
+        success: false,
+        message: "Reminder time must be before start time",
+      });
+    }
+
+    const updateData = {
+      ...(title && { title }),
+      ...(description && { description }),
+      ...(location && { location }),
+      ...(startTime && { startTime }),
+      ...(endTime && { endTime }),
+      ...(reminderTime && { reminderTime }),
+      ...(notes && { notes }),
+      ...(project && { project }),
+      ...(attendees && { attendees }),
+      ...(status && { status }),
+    };
+
     appointment = await Appointment.findByIdAndUpdate(
       req.params.id,
+      updateData,
       {
-        title,
-        location,
-        meetingTime,
-        reminderTime,
-        notes,
-        project,
-        attendees,
-        status,
-      },
-      { new: true, runValidators: true },
+        returnDocument: "after",
+        runValidators: true,
+      }
     )
-      .populate("project", "name description")
+      .populate("project", "name description color")
       .populate("createdBy", "name email profilePic");
 
     res.status(200).json({
       success: true,
       data: appointment,
+      message: "Appointment updated successfully",
     });
   } catch (error) {
     res.status(500).json({
@@ -287,14 +310,16 @@ export const updateAppointment = async (req, res) => {
   }
 };
 
+
+
 export const rescheduleAppointment = async (req, res) => {
   try {
-    const { meetingTime, reminderTime } = req.body;
+    const { startTime, reminderTime } = req.body;
 
-    if (!meetingTime) {
+    if (!startTime) {
       return res.status(400).json({
         success: false,
-        message: "New meeting time is required",
+        message: "New start time is required",
       });
     }
 
@@ -307,9 +332,9 @@ export const rescheduleAppointment = async (req, res) => {
       });
     }
 
-    // Check permission
+    // Permission check
     if (
-      req.user.role !== "admin" &&
+      req.user.role !== "super_admin" &&
       appointment.createdBy.toString() !== req.user._id.toString()
     ) {
       return res.status(403).json({
@@ -318,33 +343,43 @@ export const rescheduleAppointment = async (req, res) => {
       });
     }
 
-    // Check if appointment can be rescheduled (not completed/cancelled)
-    if (
-      appointment.status === "completed" ||
-      appointment.status === "cancelled"
-    ) {
+    // Cannot reschedule completed or cancelled
+    if (["completed", "cancelled"].includes(appointment.status)) {
       return res.status(400).json({
         success: false,
         message: `Cannot reschedule ${appointment.status} appointment`,
       });
     }
 
-    // Validate new meeting time
-    if (new Date(meetingTime) < new Date()) {
+    const newStartTime = new Date(startTime);
+
+    if (newStartTime < new Date()) {
       return res.status(400).json({
         success: false,
-        message: "New meeting time must be in the future",
+        message: "New start time must be in the future",
       });
     }
 
-    appointment.meetingTime = meetingTime;
-    if (reminderTime) appointment.reminderTime = reminderTime;
+    // ✅ ONLY UPDATE WHAT YOU WANT
+    appointment.startTime = newStartTime;
+
+    if (reminderTime) {
+      if (new Date(reminderTime) >= newStartTime) {
+        return res.status(400).json({
+          success: false,
+          message: "Reminder time must be before start time",
+        });
+      }
+      appointment.reminderTime = reminderTime;
+    }
+
+    appointment.status = "rescheduled";
 
     await appointment.save();
 
     const updatedAppointment = await Appointment.findById(appointment._id)
       .populate("project", "name description")
-      .populate("createdBy", "name email profilePic");
+      .populate("createdBy", "name email");
 
     res.status(200).json({
       success: true,
@@ -359,6 +394,7 @@ export const rescheduleAppointment = async (req, res) => {
   }
 };
 
+
 export const cancelAppointment = async (req, res) => {
   try {
     const appointment = await Appointment.findById(req.params.id);
@@ -370,10 +406,10 @@ export const cancelAppointment = async (req, res) => {
       });
     }
 
-    // Check permission (only creator or admin can cancel)
+    // Check permission (only creator or super_admin can cancel)
     // Since attendees are strings, we can't check if current user is an attendee by ID
     if (
-      req.user.role !== "admin" &&
+      req.user.role !== "super_admin" &&
       appointment.createdBy.toString() !== req.user._id.toString()
     ) {
       return res.status(403).json({
@@ -424,9 +460,9 @@ export const completeAppointment = async (req, res) => {
       });
     }
 
-    // Check permission (only creator or admin)
+    // Check permission (only creator or super_admin)
     if (
-      req.user.role !== "admin" &&
+      req.user.role !== "super_admin" &&
       appointment.createdBy.toString() !== req.user._id.toString()
     ) {
       return res.status(403).json({
@@ -476,9 +512,9 @@ export const deleteAppointment = async (req, res) => {
       });
     }
 
-    // Check permission (only creator or admin)
+    // Check permission (only creator or super_admin)
     if (
-      req.user.role !== "admin" &&
+      req.user.role !== "super_admin" &&
       appointment.createdBy.toString() !== req.user._id.toString()
     ) {
       return res.status(403).json({
@@ -614,7 +650,7 @@ export const addAttendee = async (req, res) => {
 
     // Check permission
     if (
-      req.user.role !== "admin" &&
+      req.user.role !== "super_admin" &&
       appointment.createdBy.toString() !== req.user._id.toString()
     ) {
       return res.status(403).json({
@@ -651,7 +687,7 @@ export const addAttendee = async (req, res) => {
 
 export const removeAttendee = async (req, res) => {
   try {
-    const { name } = req.params;
+    const { attendee } = req.params; // ✅ FIXED
 
     const appointment = await Appointment.findById(req.params.id);
 
@@ -662,9 +698,9 @@ export const removeAttendee = async (req, res) => {
       });
     }
 
-    // Check permission
+    // Permission check
     if (
-      req.user.role !== "admin" &&
+      req.user.role !== "super_admin" &&
       appointment.createdBy.toString() !== req.user._id.toString()
     ) {
       return res.status(403).json({
@@ -673,11 +709,22 @@ export const removeAttendee = async (req, res) => {
       });
     }
 
-    // Remove the attendee
+    const decodedAttendee = decodeURIComponent(attendee).toLowerCase();
+
+    const originalLength = appointment.attendees.length;
+
     appointment.attendees = appointment.attendees.filter(
-      (attendeeName) =>
-        attendeeName.toLowerCase() !== decodeURIComponent(name).toLowerCase(),
+      (a) => a.toLowerCase() !== decodedAttendee
     );
+
+    // ✅ If attendee not found
+    if (appointment.attendees.length === originalLength) {
+      return res.status(404).json({
+        success: false,
+        message: "Attendee not found",
+      });
+    }
+
     await appointment.save();
 
     res.status(200).json({
@@ -694,6 +741,7 @@ export const removeAttendee = async (req, res) => {
     });
   }
 };
+
 
 export const getCalendarAppointments = async (req, res) => {
   try {
@@ -725,7 +773,7 @@ export const getCalendarAppointments = async (req, res) => {
       ]
     };
 
-    // If user is not admin, show only their appointments
+    // If user is not super_admin, show only their appointments
     if (req.user.role !== "super_admin") {
       filter.createdBy = req.user._id;
     }

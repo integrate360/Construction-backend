@@ -48,8 +48,11 @@ router.patch("/completeAppointment/:id/complete", completeAppointment);
 router.post("/addAttendee/:id/attendees", addAttendee);
 
 router.delete("/removeAttendee/:id/attendees/:attendee", removeAttendee);
-router.get("/calendar", getCalendarAppointments); 
-router.get("/agenda", getAgendaView); 
-router.get("/check-availability", checkAvailability); 
+
+router.get("/calendar", getCalendarAppointments);
+
+router.get("/agenda", getAgendaView);
+
+router.get("/check-availability", checkAvailability);
 
 export default router;
