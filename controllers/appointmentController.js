@@ -83,7 +83,6 @@ export const createAppointment = async (req, res) => {
   }
 };
 
-
 export const getAppointments = async (req, res) => {
   try {
     const {
@@ -249,7 +248,9 @@ export const updateAppointment = async (req, res) => {
     }
 
     // Time validation
-    const newStartTime = startTime ? new Date(startTime) : appointment.startTime;
+    const newStartTime = startTime
+      ? new Date(startTime)
+      : appointment.startTime;
     const newEndTime = endTime ? new Date(endTime) : appointment.endTime;
 
     if (newStartTime < new Date()) {
@@ -292,7 +293,7 @@ export const updateAppointment = async (req, res) => {
       {
         returnDocument: "after",
         runValidators: true,
-      }
+      },
     )
       .populate("project", "name description color")
       .populate("createdBy", "name email profilePic");
@@ -309,8 +310,6 @@ export const updateAppointment = async (req, res) => {
     });
   }
 };
-
-
 
 export const rescheduleAppointment = async (req, res) => {
   try {
@@ -393,7 +392,6 @@ export const rescheduleAppointment = async (req, res) => {
     });
   }
 };
-
 
 export const cancelAppointment = async (req, res) => {
   try {
@@ -581,7 +579,6 @@ export const getAppointmentStats = async (req, res) => {
       {
         $match: {
           isActive: true,
-          createdBy: userId, // Only count appointments created by the user
         },
       },
       {
@@ -714,7 +711,7 @@ export const removeAttendee = async (req, res) => {
     const originalLength = appointment.attendees.length;
 
     appointment.attendees = appointment.attendees.filter(
-      (a) => a.toLowerCase() !== decodedAttendee
+      (a) => a.toLowerCase() !== decodedAttendee,
     );
 
     // ✅ If attendee not found
@@ -742,11 +739,10 @@ export const removeAttendee = async (req, res) => {
   }
 };
 
-
 export const getCalendarAppointments = async (req, res) => {
   try {
-    const { start, end, view = 'month' } = req.query;
-    
+    const { start, end, view = "month" } = req.query;
+
     if (!start || !end) {
       return res.status(400).json({
         success: false,
@@ -764,13 +760,13 @@ export const getCalendarAppointments = async (req, res) => {
         // Appointments that overlap with the date range
         {
           startTime: { $lte: endDate },
-          endTime: { $gte: startDate }
+          endTime: { $gte: startDate },
         },
         // All-day or single-day appointments
         {
-          startTime: { $gte: startDate, $lte: endDate }
-        }
-      ]
+          startTime: { $gte: startDate, $lte: endDate },
+        },
+      ],
     };
 
     // If user is not super_admin, show only their appointments
@@ -789,7 +785,7 @@ export const getCalendarAppointments = async (req, res) => {
       .sort({ startTime: 1 });
 
     // Format appointments for calendar display
-    const calendarEvents = appointments.map(appointment => ({
+    const calendarEvents = appointments.map((appointment) => ({
       id: appointment._id,
       title: appointment.title,
       start: appointment.startTime,
@@ -805,7 +801,7 @@ export const getCalendarAppointments = async (req, res) => {
         project: appointment.project,
         notes: appointment.notes,
         createdBy: appointment.createdBy,
-      }
+      },
     }));
 
     res.status(200).json({
@@ -815,10 +811,9 @@ export const getCalendarAppointments = async (req, res) => {
       range: {
         start: startDate,
         end: endDate,
-        view
-      }
+        view,
+      },
     });
-
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -841,15 +836,15 @@ const getStatusColor = (status) => {
 export const getAgendaView = async (req, res) => {
   try {
     const { days = 30 } = req.query;
-    
+
     const startDate = new Date();
     const endDate = new Date();
     endDate.setDate(endDate.getDate() + parseInt(days));
 
     const filter = {
       isActive: true,
-      status: { $ne: 'cancelled' },
-      startTime: { $gte: startDate, $lte: endDate }
+      status: { $ne: "cancelled" },
+      startTime: { $gte: startDate, $lte: endDate },
     };
 
     if (req.user.role !== "super_admin") {
@@ -863,32 +858,37 @@ export const getAgendaView = async (req, res) => {
 
     // Group appointments by date
     const groupedByDate = {};
-    
-    appointments.forEach(appointment => {
-      const dateKey = appointment.startTime.toISOString().split('T')[0];
-      
+
+    appointments.forEach((appointment) => {
+      const dateKey = appointment.startTime.toISOString().split("T")[0];
+
       if (!groupedByDate[dateKey]) {
         groupedByDate[dateKey] = [];
       }
-      
+
       groupedByDate[dateKey].push({
         id: appointment._id,
         title: appointment.title,
-        time: appointment.startTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        endTime: appointment.endTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        time: appointment.startTime.toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
+        endTime: appointment.endTime.toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
         status: appointment.status,
         location: appointment.location,
         project: appointment.project?.name,
-        duration: getDuration(appointment.startTime, appointment.endTime)
+        duration: getDuration(appointment.startTime, appointment.endTime),
       });
     });
 
     res.status(200).json({
       success: true,
       data: groupedByDate,
-      count: appointments.length
+      count: appointments.length,
     });
-
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -904,7 +904,6 @@ const getDuration = (start, end) => {
   const minutes = diff % 60;
   return minutes > 0 ? `${hours}h ${minutes}m` : `${hours} hours`;
 };
-
 
 export const checkAvailability = async (req, res) => {
   try {
@@ -923,14 +922,14 @@ export const checkAvailability = async (req, res) => {
     // Check for overlapping appointments
     const filter = {
       isActive: true,
-      status: { $in: ['scheduled', 'rescheduled'] },
+      status: { $in: ["scheduled", "rescheduled"] },
       $or: [
         // Overlapping conditions
         {
           startTime: { $lt: end },
-          endTime: { $gt: start }
-        }
-      ]
+          endTime: { $gt: start },
+        },
+      ],
     };
 
     // Exclude current appointment when checking
@@ -943,23 +942,24 @@ export const checkAvailability = async (req, res) => {
       filter.createdBy = req.user._id;
     }
 
-    const conflictingAppointments = await Appointment.find(filter)
-      .populate("createdBy", "name");
+    const conflictingAppointments = await Appointment.find(filter).populate(
+      "createdBy",
+      "name",
+    );
 
     const isAvailable = conflictingAppointments.length === 0;
 
     res.status(200).json({
       success: true,
       isAvailable,
-      conflicts: conflictingAppointments.map(apt => ({
+      conflicts: conflictingAppointments.map((apt) => ({
         id: apt._id,
         title: apt.title,
         startTime: apt.startTime,
         endTime: apt.endTime,
-        createdBy: apt.createdBy?.name
-      })) 
+        createdBy: apt.createdBy?.name,
+      })),
     });
-
   } catch (error) {
     res.status(500).json({
       success: false,
