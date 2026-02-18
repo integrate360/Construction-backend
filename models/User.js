@@ -15,6 +15,10 @@ const UserSchema = new mongoose.Schema(
       unique: true,
       lowercase: true,
     },
+    phoneNumber: {
+      type: Number,
+      unique: true,
+    },
     password: {
       type: String,
       required: true,
@@ -37,6 +41,8 @@ const UserSchema = new mongoose.Schema(
         ref: "Project",
       },
     ],
+    address: String,
+    gstNumber: String,
     isActive: {
       type: Boolean,
       default: true,
@@ -47,13 +53,10 @@ const UserSchema = new mongoose.Schema(
   },
 );
 
-// Fixed pre-save middleware - Using async function without next parameter
 UserSchema.pre("save", async function () {
-  // Only hash the password if it's modified
   if (!this.isModified("password")) return;
 
   try {
-    // Hash the password with bcrypt
     const salt = await bcrypt.genSalt(10);
     this.password = await bcrypt.hash(this.password, salt);
   } catch (error) {
@@ -61,12 +64,10 @@ UserSchema.pre("save", async function () {
   }
 });
 
-// Method to compare entered password with hashed password
 UserSchema.methods.matchPassword = async function (enteredPassword) {
   return await bcrypt.compare(enteredPassword, this.password);
 };
 
-// Method to generate JWT token
 UserSchema.methods.getSignedJwtToken = function () {
   return jwt.sign(
     {
