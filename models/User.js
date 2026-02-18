@@ -32,7 +32,7 @@ const UserSchema = new mongoose.Schema(
     },
     role: {
       type: String,
-      enum: ["super_admin", "site_manager", "client", "labour"],
+      enum: ["saas_admin","super_admin", "site_manager", "client", "labour"],
       default: "labour",
     },
     assignedSites: [
