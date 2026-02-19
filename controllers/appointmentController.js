@@ -741,7 +741,11 @@ export const getCalendarAppointments = async (req, res) => {
     }
 
     // Role-based filter
-    if (req.user.role !== "super_admin") {
+    if (req.user.role === "saas_admin") {
+      // Saas admin can see all appointments
+      // No filter needed for createdBy
+    } else {
+      // For non-saas_admin users (including super_admin), filter by createdBy
       filter.createdBy = req.user._id;
     }
 
