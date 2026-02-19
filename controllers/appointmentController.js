@@ -557,12 +557,22 @@ export const getUpcomingAppointments = async (req, res) => {
 export const getAppointmentStats = async (req, res) => {
   try {
     const userId = req.user._id;
+    const userRole = req.user.role;
 
+    // Build the match filter based on role
+    const matchFilter = {};
+    
+    // Role-based filter
+    if (userRole !== "saas_admin") {
+      // For non-saas_admin users, filter by createdBy
+      matchFilter.createdBy = userId;
+    }
+    // For saas_admin, no createdBy filter (gets all appointments)
+
+    // Get status counts
     const stats = await Appointment.aggregate([
       {
-        $match: {
-          createdBy: userId,  // Removed isActive: true filter
-        },
+        $match: matchFilter,
       },
       {
         $group: {
@@ -577,12 +587,17 @@ export const getAppointmentStats = async (req, res) => {
     const nextWeek = new Date();
     nextWeek.setDate(nextWeek.getDate() + 7);
 
-    const upcomingCount = await Appointment.countDocuments({
+    // Build upcoming filter based on role
+    const upcomingFilter = {
       status: "scheduled",
       startTime: { $gte: today, $lte: nextWeek },
-      createdBy: userId,
-      // Removed isActive: true from here as well
-    });
+    };
+    
+    if (userRole !== "saas_admin") {
+      upcomingFilter.createdBy = userId;
+    }
+
+    const upcomingCount = await Appointment.countDocuments(upcomingFilter);
 
     // Format stats
     const formattedStats = {
@@ -597,9 +612,16 @@ export const getAppointmentStats = async (req, res) => {
       formattedStats[stat._id] = stat.count;
     });
 
+    // Add total count for saas_admin
+    if (userRole === "saas_admin") {
+      const totalCount = await Appointment.countDocuments({});
+      formattedStats.total = totalCount;
+    }
+
     res.status(200).json({
       success: true,
       data: formattedStats,
+      role: userRole, // Optional: include role info in response
     });
   } catch (error) {
     res.status(500).json({
