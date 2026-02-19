@@ -300,10 +300,26 @@ export const getMyProfile = async (req, res, next) => {
 
 export const updateMyProfile = async (req, res, next) => {
   try {
-    const { name, phoneNumber, profilePicture, address, gstNumber, panNumber, adharNumber } = req.body;
+    const {
+      name,
+      phoneNumber,
+      profilePicture,
+      address,
+      gstNumber,
+      panNumber,
+      adharNumber,
+    } = req.body;
 
     // Validate fields to update
-    if (!name && !phoneNumber && !profilePicture && !address && !gstNumber && !panNumber && !adharNumber) {
+    if (
+      !name &&
+      !phoneNumber &&
+      !profilePicture &&
+      !address &&
+      !gstNumber &&
+      !panNumber &&
+      !adharNumber
+    ) {
       return res.status(400).json({
         success: false,
         message: "Please provide at least one field to update",
@@ -431,7 +447,7 @@ export const updateMyProfile = async (req, res, next) => {
         message: `${field} is already in use`,
       });
     }
-    
+
     res.status(500).json({
       success: false,
       message: error.message || "Profile update failed",
@@ -508,7 +524,6 @@ export const getAllUsers = async (req, res, next) => {
       sortBy = "createdAt",
       sortOrder = "desc",
     } = req.query;
-
     const filter = {};
     if (role) filter.role = role;
     if (isActive !== undefined) filter.isActive = isActive === "true";
@@ -516,6 +531,7 @@ export const getAllUsers = async (req, res, next) => {
     // Apply data access rules based on user role
     const currentUserRole = req.user.role;
     const currentUserId = req.user.id;
+    console.log(currentUserRole, currentUserId);
 
     if (currentUserRole === "saas_admin") {
       // SaaS Admin can see all users
@@ -613,26 +629,28 @@ export const getUserById = async (req, res, next) => {
 
     let hasPermission = false;
 
-    if (currentUserRole === 'saas_admin') {
+    if (currentUserRole === "saas_admin") {
       // SaaS Admin can view any user
       hasPermission = true;
-    } 
-    else if (currentUserRole === 'super_admin') {
+    } else if (currentUserRole === "super_admin") {
       // Super Admin can view:
       // 1. Any user associated with them
       // 2. Any labour, client, site_manager (since they manage everything)
-      if (user.associatedWithUser?._id.toString() === currentUserId ||
-          ['labour', 'client', 'site_manager'].includes(user.role)) {
+      if (
+        user.associatedWithUser?._id.toString() === currentUserId ||
+        ["labour", "client", "site_manager"].includes(user.role)
+      ) {
         hasPermission = true;
       }
-    }
-    else if (currentUserRole === 'site_manager' || currentUserRole === 'client') {
+    } else if (
+      currentUserRole === "site_manager" ||
+      currentUserRole === "client"
+    ) {
       // Site Manager and Client can only view users associated with them
       if (user.associatedWithUser?._id.toString() === currentUserId) {
         hasPermission = true;
       }
-    }
-    else if (currentUserRole === 'labour') {
+    } else if (currentUserRole === "labour") {
       // Labour can only view themselves
       if (user._id.toString() === currentUserId) {
         hasPermission = true;
@@ -666,17 +684,17 @@ export const getUserById = async (req, res, next) => {
 
 export const updateUserByAdmin = async (req, res, next) => {
   try {
-    const { 
-      name, 
-      email, 
-      role, 
-      phoneNumber, 
-      isActive, 
-      address, 
+    const {
+      name,
+      email,
+      role,
+      phoneNumber,
+      isActive,
+      address,
       gstNumber,
       panNumber,
       adharNumber,
-      profilePicture 
+      profilePicture,
     } = req.body;
 
     // Validate at least one field is provided
@@ -710,33 +728,37 @@ export const updateUserByAdmin = async (req, res, next) => {
     // Role-based permission check for role updates
     if (role && role !== targetUser.role) {
       const adminRole = req.user.role;
-      
+
       // Define who can change roles to what
       const roleChangePermissions = {
         saas_admin: {
           canChangeRoleOf: ["super_admin"], // SaaS Admin can only change Super Admin roles
-          canAssignRoles: ["super_admin"] // Can only assign Super Admin role
+          canAssignRoles: ["super_admin"], // Can only assign Super Admin role
         },
         super_admin: {
           canChangeRoleOf: ["site_manager", "client", "labour"], // Super Admin can change these roles
-          canAssignRoles: ["site_manager", "client", "labour"] // Can assign these roles
+          canAssignRoles: ["site_manager", "client", "labour"], // Can assign these roles
         },
         site_manager: {
           canChangeRoleOf: [], // Cannot change any roles
-          canAssignRoles: []
+          canAssignRoles: [],
         },
         client: {
           canChangeRoleOf: [], // Cannot change any roles
-          canAssignRoles: []
+          canAssignRoles: [],
         },
         labour: {
           canChangeRoleOf: [], // Cannot change any roles
-          canAssignRoles: []
-        }
+          canAssignRoles: [],
+        },
       };
 
       // Check if admin has permission to change this user's role
-      if (!roleChangePermissions[adminRole]?.canChangeRoleOf.includes(targetUser.role)) {
+      if (
+        !roleChangePermissions[adminRole]?.canChangeRoleOf.includes(
+          targetUser.role,
+        )
+      ) {
         return res.status(403).json({
           success: false,
           message: `You don't have permission to change the role of a ${targetUser.role}`,
@@ -882,10 +904,20 @@ export const updateUserByAdmin = async (req, res, next) => {
     }
 
     // Validate role if provided (basic validation)
-    if (role && !["super_admin", "site_manager", "client", "labour", "saas_admin"].includes(role)) {
+    if (
+      role &&
+      ![
+        "super_admin",
+        "site_manager",
+        "client",
+        "labour",
+        "saas_admin",
+      ].includes(role)
+    ) {
       return res.status(400).json({
         success: false,
-        message: "Invalid role. Allowed roles: saas_admin, super_admin, site_manager, client, labour",
+        message:
+          "Invalid role. Allowed roles: saas_admin, super_admin, site_manager, client, labour",
       });
     }
 
@@ -956,7 +988,7 @@ export const updateUserByAdmin = async (req, res, next) => {
         message: `${field} is already in use`,
       });
     }
-    
+
     res.status(500).json({
       success: false,
       message: error.message || "Failed to update user",
