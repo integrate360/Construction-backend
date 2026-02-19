@@ -124,8 +124,12 @@ export const getAppointments = async (req, res) => {
       ];
     }
 
-    // If user is not super_admin, show only appointments they created
-    if (req.user.role !== "super_admin") {
+    // Role-based access control
+    if (req.user.role === "saas_admin") {
+      // SaaS admin can see all appointments
+      // No additional filter needed
+    } else {
+      // For other roles (including super_admin), show only appointments they created
       filter.createdBy = req.user._id;
     }
 
@@ -177,9 +181,8 @@ export const getAppointmentById = async (req, res) => {
         message: "Appointment not found",
       });
     }
-
-    // Check if user has access to this appointment
     if (
+      req.user.role !== "saas_admin" &&
       req.user.role !== "super_admin" &&
       appointment.createdBy._id.toString() !== req.user._id.toString()
     ) {
