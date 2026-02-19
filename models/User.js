@@ -32,9 +32,14 @@ const UserSchema = new mongoose.Schema(
     },
     role: {
       type: String,
-      enum: ["saas_admin","super_admin", "site_manager", "client", "labour"],
+      enum: ["saas_admin", "super_admin", "site_manager", "client", "labour"],
       default: "labour",
     },
+    associatedUser: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+
     assignedSites: [
       {
         type: mongoose.Schema.Types.ObjectId,
@@ -43,6 +48,8 @@ const UserSchema = new mongoose.Schema(
     ],
     address: String,
     gstNumber: String,
+    panNumber: String,
+    adharNumber: String,
     isActive: {
       type: Boolean,
       default: true,
@@ -76,7 +83,7 @@ UserSchema.methods.getSignedJwtToken = function () {
     },
     process.env.JWT_SECRET,
     {
-      expiresIn: process.env.JWT_EXPIRE || "365d",
+      expiresIn: process.env.JWT_EXPIRE || "30d",
     },
   );
 };
