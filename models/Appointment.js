@@ -85,9 +85,4 @@ const AppointmentSchema = new mongoose.Schema(
   },
 );
 
-// Indexes
-AppointmentSchema.index({ startTime: 1, endTime: 1 });
-AppointmentSchema.index({ status: 1, startTime: 1 });
-AppointmentSchema.index({ createdBy: 1, startTime: 1 });
-
 export default mongoose.model("Appointment", AppointmentSchema);
