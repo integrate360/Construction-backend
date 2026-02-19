@@ -35,7 +35,7 @@ const UserSchema = new mongoose.Schema(
       enum: ["saas_admin", "super_admin", "site_manager", "client", "labour"],
       default: "labour",
     },
-    associatedUser: {
+    associatedWithUser: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
     },
@@ -73,6 +73,7 @@ UserSchema.methods.getSignedJwtToken = function () {
     {
       id: this._id,
       role: this.role,
+      associatedWithUser: this.associatedWithUser || null,
     },
     process.env.JWT_SECRET,
     {

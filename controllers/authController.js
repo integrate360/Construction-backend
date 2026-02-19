@@ -2,8 +2,18 @@ import User from "../models/User.js";
 
 export const registerUser = async (req, res, next) => {
   try {
-    const { name, email, password, role, phoneNumber, address, gstNumber } =
-      req.body;
+    const {
+      name,
+      email,
+      password,
+      role,
+      phoneNumber,
+      address,
+      gstNumber,
+      panNumber,
+      adharNumber,
+      profilePicture,
+    } = req.body;
 
     // Validation
     if (!name || !email || !password || !phoneNumber) {
@@ -22,13 +32,44 @@ export const registerUser = async (req, res, next) => {
       });
     }
 
-    // Phone number validation (basic - can be customized based on your region)
-    const phoneRegex = /^\d{10}$/; // Assuming 10 digit phone number
+    // Phone number validation
+    const phoneRegex = /^\d{10}$/;
     if (!phoneRegex.test(phoneNumber)) {
       return res.status(400).json({
         success: false,
         message: "Please provide a valid 10-digit phone number",
       });
+    }
+
+    // PAN Number validation (if provided)
+    if (panNumber) {
+      const panRegex = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/;
+      if (!panRegex.test(panNumber)) {
+        return res.status(400).json({
+          success: false,
+          message: "Please provide a valid PAN number (e.g., ABCDE1234F)",
+        });
+      }
+    }
+
+    // Aadhar Number validation (if provided)
+    if (adharNumber) {
+      const adharRegex = /^\d{12}$/;
+      if (!adharRegex.test(adharNumber)) {
+        return res.status(400).json({
+          success: false,
+          message: "Please provide a valid 12-digit Aadhar number",
+        });
+      }
+
+      // Check if Aadhar is already registered
+      const existingAadhar = await User.findOne({ adharNumber });
+      if (existingAadhar) {
+        return res.status(400).json({
+          success: false,
+          message: "User with this Aadhar number already exists",
+        });
+      }
     }
 
     // GST Number validation (if provided)
@@ -38,7 +79,16 @@ export const registerUser = async (req, res, next) => {
       if (!gstRegex.test(gstNumber)) {
         return res.status(400).json({
           success: false,
-          message: "Please provide a valid GST number",
+          message: "Please provide a valid GST number (e.g., 22AAAAA0000A1Z5)",
+        });
+      }
+
+      // Check if GST is already registered
+      const existingGST = await User.findOne({ gstNumber });
+      if (existingGST) {
+        return res.status(400).json({
+          success: false,
+          message: "User with this GST number already exists",
         });
       }
     }
@@ -51,7 +101,7 @@ export const registerUser = async (req, res, next) => {
       });
     }
 
-    // Check if user exists
+    // Check if user exists by email or phone
     const userExists = await User.findOne({
       $or: [{ email }, { phoneNumber }],
     });
@@ -71,20 +121,83 @@ export const registerUser = async (req, res, next) => {
       }
     }
 
-    const user = await User.create({
+    // Role-based permissions for who can create what
+    const creatorRole = req.user.role;
+    const newUserRole = role || "labour";
+
+    // Define permission matrix
+    const permissions = {
+      saas_admin: {
+        canCreate: ["super_admin"], // SaaS Admin can only create Super Admin
+        associatedWith: null, // SaaS Admin doesn't need association
+      },
+      super_admin: {
+        canCreate: ["site_manager", "client", "labour"], // Super Admin can create all other roles
+        associatedWith: req.user.id, // All created users are associated with this Super Admin
+      },
+      site_manager: {
+        canCreate: [], // Cannot create any users
+        associatedWith: null,
+      },
+      client: {
+        canCreate: [], // Cannot create any users
+        associatedWith: null,
+      },
+      labour: {
+        canCreate: [], // Cannot create any users
+        associatedWith: null,
+      },
+    };
+
+    // Check if creator has permission to create the new user role
+    if (!permissions[creatorRole]?.canCreate.includes(newUserRole)) {
+      return res.status(403).json({
+        success: false,
+        message: `You don't have permission to create a user with role: ${newUserRole}. ${
+          creatorRole === "saas_admin"
+            ? "SaaS Admin can only create Super Admin."
+            : creatorRole === "super_admin"
+              ? "Super Admin can create Site Manager, Client, and Labour."
+              : "Your role does not have permission to create users."
+        }`,
+      });
+    }
+
+    // Prepare user data with all fields
+    const userData = {
       name,
       email,
       password,
       phoneNumber,
-      address,
-      gstNumber,
-      role: role || "labour",
-    });
+      role: newUserRole,
+    };
+
+    // Add optional fields only if provided
+    if (address) userData.address = address;
+    if (gstNumber) userData.gstNumber = gstNumber;
+    if (panNumber) userData.panNumber = panNumber;
+    if (adharNumber) userData.adharNumber = adharNumber;
+    if (profilePicture) userData.profilePicture = profilePicture;
+
+    // Set associatedWithUser based on creator role
+    if (creatorRole === "super_admin") {
+      // Super Admin creates users, so associate them with this Super Admin
+      userData.associatedWithUser = req.user.id;
+    }
+    // For saas_admin creating super_admin, no association needed
+
+    // Create the user
+    const user = await User.create(userData);
 
     const token = user.getSignedJwtToken();
 
     // Remove password from response
     user.password = undefined;
+
+    // Populate the associated user details if exists
+    if (user.associatedWithUser) {
+      await user.populate("associatedWithUser", "name email role");
+    }
 
     res.status(201).json({
       success: true,
@@ -93,6 +206,14 @@ export const registerUser = async (req, res, next) => {
       user,
     });
   } catch (error) {
+    if (error.code === 11000) {
+      const field = Object.keys(error.keyPattern)[0];
+      return res.status(400).json({
+        success: false,
+        message: `User with this ${field} already exists`,
+      });
+    }
+
     res.status(500).json({
       success: false,
       message: error.message || "Registration failed",
@@ -179,10 +300,10 @@ export const getMyProfile = async (req, res, next) => {
 
 export const updateMyProfile = async (req, res, next) => {
   try {
-    const { name, phoneNumber, profilePicture, address, gstNumber } = req.body;
+    const { name, phoneNumber, profilePicture, address, gstNumber, panNumber, adharNumber } = req.body;
 
     // Validate fields to update
-    if (!name && !phoneNumber && !profilePicture && !address && !gstNumber) {
+    if (!name && !phoneNumber && !profilePicture && !address && !gstNumber && !panNumber && !adharNumber) {
       return res.status(400).json({
         success: false,
         message: "Please provide at least one field to update",
@@ -213,14 +334,71 @@ export const updateMyProfile = async (req, res, next) => {
       }
     }
 
+    // Validate PAN if provided
+    if (panNumber) {
+      if (!validatePAN(panNumber)) {
+        return res.status(400).json({
+          success: false,
+          message: "Please provide a valid PAN number (e.g., ABCDE1234F)",
+        });
+      }
+
+      // Check if PAN is already taken by another user
+      const existingUser = await User.findOne({
+        panNumber,
+        _id: { $ne: req.user.id },
+      });
+
+      if (existingUser) {
+        return res.status(400).json({
+          success: false,
+          message: "PAN number is already in use",
+        });
+      }
+    }
+
+    // Validate Aadhar if provided
+    if (adharNumber) {
+      if (!validateAadhar(adharNumber)) {
+        return res.status(400).json({
+          success: false,
+          message: "Please provide a valid 12-digit Aadhar number",
+        });
+      }
+
+      // Check if Aadhar is already taken by another user
+      const existingUser = await User.findOne({
+        adharNumber,
+        _id: { $ne: req.user.id },
+      });
+
+      if (existingUser) {
+        return res.status(400).json({
+          success: false,
+          message: "Aadhar number is already in use",
+        });
+      }
+    }
+
     // Validate GST number if provided
     if (gstNumber) {
-      const gstRegex =
-        /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
-      if (!gstRegex.test(gstNumber)) {
+      if (!validateGST(gstNumber)) {
         return res.status(400).json({
           success: false,
           message: "Please provide a valid GST number",
+        });
+      }
+
+      // Check if GST is already taken by another user
+      const existingUser = await User.findOne({
+        gstNumber,
+        _id: { $ne: req.user.id },
+      });
+
+      if (existingUser) {
+        return res.status(400).json({
+          success: false,
+          message: "GST number is already in use",
         });
       }
     }
@@ -231,11 +409,13 @@ export const updateMyProfile = async (req, res, next) => {
     if (profilePicture) updates.profilePicture = profilePicture;
     if (address) updates.address = address;
     if (gstNumber) updates.gstNumber = gstNumber;
+    if (panNumber) updates.panNumber = panNumber;
+    if (adharNumber) updates.adharNumber = adharNumber;
 
     const user = await User.findByIdAndUpdate(req.user.id, updates, {
       new: true,
       runValidators: true,
-    });
+    }).select("-password");
 
     res.json({
       success: true,
@@ -243,6 +423,15 @@ export const updateMyProfile = async (req, res, next) => {
       user,
     });
   } catch (error) {
+    // Handle duplicate key errors
+    if (error.code === 11000) {
+      const field = Object.keys(error.keyPattern)[0];
+      return res.status(400).json({
+        success: false,
+        message: `${field} is already in use`,
+      });
+    }
+    
     res.status(500).json({
       success: false,
       message: error.message || "Profile update failed",
@@ -323,6 +512,35 @@ export const getAllUsers = async (req, res, next) => {
     const filter = {};
     if (role) filter.role = role;
     if (isActive !== undefined) filter.isActive = isActive === "true";
+
+    // Apply data access rules based on user role
+    const currentUserRole = req.user.role;
+    const currentUserId = req.user.id;
+
+    if (currentUserRole === "saas_admin") {
+      // SaaS Admin can see all users
+      // No additional filters needed
+    } else if (currentUserRole === "super_admin") {
+      // Super Admin can see:
+      // 1. All users associated with them
+      // 2. All labour, client, site_manager users (since they manage everything)
+      // This gives them full visibility of all users under their organization
+      filter.$or = [
+        { associatedWithUser: currentUserId },
+        { role: { $in: ["labour", "client", "site_manager"] } },
+      ];
+    } else {
+      // Other roles (site_manager, client, labour) can only see users associated with them
+      // And only if they have permission (labour might not need to see any users)
+      if (currentUserRole === "site_manager" || currentUserRole === "client") {
+        filter.associatedWithUser = currentUserId;
+      } else {
+        // Labour role - maybe they don't need to see any users
+        // Or they can only see themselves
+        filter._id = currentUserId;
+      }
+    }
+
     if (search) {
       filter.$or = [
         { name: { $regex: search, $options: "i" } },
@@ -338,13 +556,13 @@ export const getAllUsers = async (req, res, next) => {
     const sort = {};
     sort[sortBy] = sortOrder === "desc" ? -1 : 1;
 
-    // Execute queries
+    // Execute queries with population
     const users = await User.find(filter)
       .select("-password")
       .sort(sort)
       .skip(skip)
-      .limit(limitNum);
-    // .populate("assignedSites", "name location status");
+      .limit(limitNum)
+      .populate("associatedWithUser", "name email role");
 
     const totalUsers = await User.countDocuments(filter);
 
@@ -380,12 +598,51 @@ export const getUserById = async (req, res, next) => {
   try {
     const user = await User.findById(req.params.id)
       .select("-password")
-      .populate("assignedSites", "name location status");
+      .populate("associatedWithUser", "name email role phoneNumber");
 
     if (!user) {
       return res.status(404).json({
         success: false,
         message: "User not found",
+      });
+    }
+
+    // Check if the requesting user has permission to view this user
+    const currentUserRole = req.user.role;
+    const currentUserId = req.user.id;
+
+    let hasPermission = false;
+
+    if (currentUserRole === 'saas_admin') {
+      // SaaS Admin can view any user
+      hasPermission = true;
+    } 
+    else if (currentUserRole === 'super_admin') {
+      // Super Admin can view:
+      // 1. Any user associated with them
+      // 2. Any labour, client, site_manager (since they manage everything)
+      if (user.associatedWithUser?._id.toString() === currentUserId ||
+          ['labour', 'client', 'site_manager'].includes(user.role)) {
+        hasPermission = true;
+      }
+    }
+    else if (currentUserRole === 'site_manager' || currentUserRole === 'client') {
+      // Site Manager and Client can only view users associated with them
+      if (user.associatedWithUser?._id.toString() === currentUserId) {
+        hasPermission = true;
+      }
+    }
+    else if (currentUserRole === 'labour') {
+      // Labour can only view themselves
+      if (user._id.toString() === currentUserId) {
+        hasPermission = true;
+      }
+    }
+
+    if (!hasPermission) {
+      return res.status(403).json({
+        success: false,
+        message: "You don't have permission to view this user",
       });
     }
 
@@ -409,8 +666,18 @@ export const getUserById = async (req, res, next) => {
 
 export const updateUserByAdmin = async (req, res, next) => {
   try {
-    const { name, email, role, phoneNumber, isActive, address, gstNumber } =
-      req.body;
+    const { 
+      name, 
+      email, 
+      role, 
+      phoneNumber, 
+      isActive, 
+      address, 
+      gstNumber,
+      panNumber,
+      adharNumber,
+      profilePicture 
+    } = req.body;
 
     // Validate at least one field is provided
     if (
@@ -420,12 +687,77 @@ export const updateUserByAdmin = async (req, res, next) => {
       !phoneNumber &&
       isActive === undefined &&
       !address &&
-      !gstNumber
+      !gstNumber &&
+      !panNumber &&
+      !adharNumber &&
+      !profilePicture
     ) {
       return res.status(400).json({
         success: false,
         message: "Please provide at least one field to update",
       });
+    }
+
+    // Get the user being updated to check current role
+    const targetUser = await User.findById(req.params.id);
+    if (!targetUser) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    // Role-based permission check for role updates
+    if (role && role !== targetUser.role) {
+      const adminRole = req.user.role;
+      
+      // Define who can change roles to what
+      const roleChangePermissions = {
+        saas_admin: {
+          canChangeRoleOf: ["super_admin"], // SaaS Admin can only change Super Admin roles
+          canAssignRoles: ["super_admin"] // Can only assign Super Admin role
+        },
+        super_admin: {
+          canChangeRoleOf: ["site_manager", "client", "labour"], // Super Admin can change these roles
+          canAssignRoles: ["site_manager", "client", "labour"] // Can assign these roles
+        },
+        site_manager: {
+          canChangeRoleOf: [], // Cannot change any roles
+          canAssignRoles: []
+        },
+        client: {
+          canChangeRoleOf: [], // Cannot change any roles
+          canAssignRoles: []
+        },
+        labour: {
+          canChangeRoleOf: [], // Cannot change any roles
+          canAssignRoles: []
+        }
+      };
+
+      // Check if admin has permission to change this user's role
+      if (!roleChangePermissions[adminRole]?.canChangeRoleOf.includes(targetUser.role)) {
+        return res.status(403).json({
+          success: false,
+          message: `You don't have permission to change the role of a ${targetUser.role}`,
+        });
+      }
+
+      // Check if admin can assign the new role
+      if (!roleChangePermissions[adminRole]?.canAssignRoles.includes(role)) {
+        return res.status(403).json({
+          success: false,
+          message: `You don't have permission to assign the role: ${role}`,
+        });
+      }
+
+      // Prevent changing own role
+      if (req.params.id === req.user.id) {
+        return res.status(400).json({
+          success: false,
+          message: "You cannot change your own role",
+        });
+      }
     }
 
     // Validate email if provided
@@ -476,6 +808,54 @@ export const updateUserByAdmin = async (req, res, next) => {
       }
     }
 
+    // Validate PAN if provided
+    if (panNumber) {
+      const panRegex = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/;
+      if (!panRegex.test(panNumber)) {
+        return res.status(400).json({
+          success: false,
+          message: "Please provide a valid PAN number (e.g., ABCDE1234F)",
+        });
+      }
+
+      // Check if PAN is already taken by another user
+      const existingUser = await User.findOne({
+        panNumber,
+        _id: { $ne: req.params.id },
+      });
+
+      if (existingUser) {
+        return res.status(400).json({
+          success: false,
+          message: "PAN number is already in use",
+        });
+      }
+    }
+
+    // Validate Aadhar if provided
+    if (adharNumber) {
+      const adharRegex = /^\d{12}$/;
+      if (!adharRegex.test(adharNumber)) {
+        return res.status(400).json({
+          success: false,
+          message: "Please provide a valid 12-digit Aadhar number",
+        });
+      }
+
+      // Check if Aadhar is already taken by another user
+      const existingUser = await User.findOne({
+        adharNumber,
+        _id: { $ne: req.params.id },
+      });
+
+      if (existingUser) {
+        return res.status(400).json({
+          success: false,
+          message: "Aadhar number is already in use",
+        });
+      }
+    }
+
     // Validate GST number if provided
     if (gstNumber) {
       const gstRegex =
@@ -483,23 +863,33 @@ export const updateUserByAdmin = async (req, res, next) => {
       if (!gstRegex.test(gstNumber)) {
         return res.status(400).json({
           success: false,
-          message: "Please provide a valid GST number",
+          message: "Please provide a valid GST number (e.g., 22AAAAA0000A1Z5)",
+        });
+      }
+
+      // Check if GST is already taken by another user
+      const existingUser = await User.findOne({
+        gstNumber,
+        _id: { $ne: req.params.id },
+      });
+
+      if (existingUser) {
+        return res.status(400).json({
+          success: false,
+          message: "GST number is already in use",
         });
       }
     }
 
-    // Validate role if provided
-    if (
-      role &&
-      !["super_admin", "site_manager", "client", "labour"].includes(role)
-    ) {
+    // Validate role if provided (basic validation)
+    if (role && !["super_admin", "site_manager", "client", "labour", "saas_admin"].includes(role)) {
       return res.status(400).json({
         success: false,
-        message:
-          "Invalid role. Allowed roles: super_admin, site_manager, client, labour",
+        message: "Invalid role. Allowed roles: saas_admin, super_admin, site_manager, client, labour",
       });
     }
 
+    // Build updates object
     const updates = {};
     if (name) updates.name = name;
     if (email) updates.email = email;
@@ -508,6 +898,25 @@ export const updateUserByAdmin = async (req, res, next) => {
     if (isActive !== undefined) updates.isActive = isActive;
     if (address) updates.address = address;
     if (gstNumber) updates.gstNumber = gstNumber;
+    if (panNumber) updates.panNumber = panNumber;
+    if (adharNumber) updates.adharNumber = adharNumber;
+    if (profilePicture) updates.profilePicture = profilePicture;
+
+    // Additional check: If updating a user to super_admin, ensure creator is saas_admin
+    if (role === "super_admin" && req.user.role !== "saas_admin") {
+      return res.status(403).json({
+        success: false,
+        message: "Only SaaS Admin can assign Super Admin role",
+      });
+    }
+
+    // If updating a user to saas_admin, prevent it (only one SaaS Admin?)
+    if (role === "saas_admin") {
+      return res.status(403).json({
+        success: false,
+        message: "Cannot assign SaaS Admin role through this endpoint",
+      });
+    }
 
     const user = await User.findByIdAndUpdate(req.params.id, updates, {
       new: true,
@@ -519,6 +928,11 @@ export const updateUserByAdmin = async (req, res, next) => {
         success: false,
         message: "User not found",
       });
+    }
+
+    // Populate associated user if exists
+    if (user.associatedWithUser) {
+      await user.populate("associatedWithUser", "name email role");
     }
 
     res.json({
@@ -533,6 +947,16 @@ export const updateUserByAdmin = async (req, res, next) => {
         message: "Invalid user ID format",
       });
     }
+
+    // Handle duplicate key errors
+    if (error.code === 11000) {
+      const field = Object.keys(error.keyPattern)[0];
+      return res.status(400).json({
+        success: false,
+        message: `${field} is already in use`,
+      });
+    }
+    
     res.status(500).json({
       success: false,
       message: error.message || "Failed to update user",
