@@ -234,6 +234,15 @@ export const loginUser = async (req, res, next) => {
 
     const user = await User.findOne({ email }).select("+password");
 
+    if (
+      !["super_admin", "site_manager", "client", "labour"].includes(user.role)
+    ) {
+      return res.status(403).json({
+        success: false,
+        message: "Access denied.",
+      });
+    }
+
     if (!user) {
       return res.status(401).json({
         success: false,
@@ -258,7 +267,73 @@ export const loginUser = async (req, res, next) => {
 
     const token = user.getSignedJwtToken();
 
-    // Remove password from response
+    user.password = undefined;
+
+    res.json({
+      success: true,
+      message: "Login successful",
+      token,
+      user,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message || "Login failed",
+    });
+  }
+};
+
+export const adminLogin = async (req, res, next) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: "Please provide email and password",
+      });
+    }
+
+    const user = await User.findOne({ email }).select("+password");
+
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid credentials",
+      });
+    }
+
+    if (!["saas_admin", "super_admin"].includes(user.role)) {
+      return res.status(403).json({
+        success: false,
+        message: "Access denied.",
+      });
+    }
+
+    if (user.role === "super_admin" && !user.isActive) {
+      return res.status(403).json({
+        success: false,
+        message: "Your account is deactivated. Contact Admin.",
+      });
+    }
+    const isPasswordMatch = await user.matchPassword(password);
+    if (!isPasswordMatch) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid credentials",
+      });
+    }
+
+    if (user.role === "saas_admin" && !user.isActive) {
+      return res.status(403).json({
+        success: false,
+        message: "Your SaaS Admin account is deactivated.",
+      });
+    }
+
+    // Generate Token
+    const token = user.getSignedJwtToken();
+
     user.password = undefined;
 
     res.json({
@@ -524,7 +599,9 @@ export const getAllUsers = async (req, res, next) => {
       sortBy = "createdAt",
       sortOrder = "desc",
     } = req.query;
-    const filter = {};
+
+    let filter = {}; // Use let instead of const to allow reassignment
+
     if (role) filter.role = role;
     if (isActive !== undefined) filter.isActive = isActive === "true";
 
@@ -537,14 +614,9 @@ export const getAllUsers = async (req, res, next) => {
       // SaaS Admin can see all users
       // No additional filters needed
     } else if (currentUserRole === "super_admin") {
-      // Super Admin can see:
-      // 1. All users associated with them
-      // 2. All labour, client, site_manager users (since they manage everything)
-      // This gives them full visibility of all users under their organization
-      filter.$or = [
-        { associatedWithUser: currentUserId },
-        { role: { $in: ["labour", "client", "site_manager"] } },
-      ];
+      // Super Admin can only see users associated with them
+      // This includes all roles (labour, client, site_manager, etc.)
+      filter.associatedWithUser = currentUserId;
     } else {
       // Other roles (site_manager, client, labour) can only see users associated with them
       // And only if they have permission (labour might not need to see any users)
@@ -557,13 +629,27 @@ export const getAllUsers = async (req, res, next) => {
       }
     }
 
+    // Handle search separately to avoid circular references
     if (search) {
-      filter.$or = [
-        { name: { $regex: search, $options: "i" } },
-        { email: { $regex: search, $options: "i" } },
-        { address: { $regex: search, $options: "i" } },
-        { gstNumber: { $regex: search, $options: "i" } },
-      ];
+      const searchFilter = {
+        $or: [
+          { name: { $regex: search, $options: "i" } },
+          { email: { $regex: search, $options: "i" } },
+          { address: { $regex: search, $options: "i" } },
+          { gstNumber: { $regex: search, $options: "i" } },
+        ],
+      };
+
+      // If there are existing filters, combine them properly
+      if (Object.keys(filter).length > 0) {
+        // Create a new filter object with $and that combines existing filter and searchFilter
+        filter = {
+          $and: [filter, searchFilter],
+        };
+      } else {
+        // If no existing filters, just use the search filter
+        filter = searchFilter;
+      }
     }
 
     const pageNum = parseInt(page);
