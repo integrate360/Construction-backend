@@ -90,7 +90,7 @@ export const getAppointments = async (req, res) => {
     } = req.query;
 
     // Build filter object
-    // const filter = { isActive: true };
+    const filter = { };
 
     // Filter by status
     if (status) {
