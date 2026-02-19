@@ -561,8 +561,7 @@ export const getAppointmentStats = async (req, res) => {
     const stats = await Appointment.aggregate([
       {
         $match: {
-          isActive: true,
-          createdBy: userId,
+          createdBy: userId,  // Removed isActive: true filter
         },
       },
       {
@@ -579,10 +578,10 @@ export const getAppointmentStats = async (req, res) => {
     nextWeek.setDate(nextWeek.getDate() + 7);
 
     const upcomingCount = await Appointment.countDocuments({
-      isActive: true,
       status: "scheduled",
       startTime: { $gte: today, $lte: nextWeek },
       createdBy: userId,
+      // Removed isActive: true from here as well
     });
 
     // Format stats
@@ -728,9 +727,7 @@ export const getCalendarAppointments = async (req, res) => {
   try {
     const { start, end, status } = req.query;
 
-    const filter = {
-      isActive: true,
-    };
+    const filter = {};
 
     // Date range filter
     if (start && end) {
