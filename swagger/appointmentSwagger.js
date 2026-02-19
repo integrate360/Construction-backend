@@ -135,6 +135,8 @@
  *         reminderTime:
  *           type: string
  *           format: date-time
+ *         notes:
+ *           type: string
  *     
  *     CancelRequest:
  *       type: object
@@ -153,6 +155,8 @@
  *     AppointmentStats:
  *       type: object
  *       properties:
+ *         total:
+ *           type: integer
  *         scheduled:
  *           type: integer
  *         completed:
@@ -161,8 +165,12 @@
  *           type: integer
  *         rescheduled:
  *           type: integer
- *         total:
+ *         upcoming:
  *           type: integer
+ *         byProject:
+ *           type: object
+ *           additionalProperties:
+ *             type: integer
  *     
  *     CalendarAppointment:
  *       type: object
@@ -174,7 +182,12 @@
  *         start:
  *           type: string
  *           format: date-time
- *         color:
+ *         allDay:
+ *           type: boolean
+ *           default: false
+ *         backgroundColor:
+ *           type: string
+ *         borderColor:
  *           type: string
  *         extendedProps:
  *           type: object
@@ -196,6 +209,16 @@
  *             createdBy:
  *               type: string
  *     
+ *     ApiResponse:
+ *       type: object
+ *       properties:
+ *         success:
+ *           type: boolean
+ *         message:
+ *           type: string
+ *         data:
+ *           type: object
+ *     
  *     ErrorResponse:
  *       type: object
  *       properties:
@@ -216,14 +239,12 @@
  *     parameters:
  *       - in: query
  *         name: start
- *         required: true
  *         schema:
  *           type: string
  *           format: date
  *         description: Start date (YYYY-MM-DD)
  *       - in: query
  *         name: end
- *         required: true
  *         schema:
  *           type: string
  *           format: date
@@ -281,7 +302,7 @@
  *         description: Filter by project ID
  *     responses:
  *       200:
- *         description: Successful response
+ *         description: Agenda view retrieved successfully
  *         content:
  *           application/json:
  *             schema:
@@ -295,6 +316,8 @@
  *                     type: array
  *                     items:
  *                       $ref: '#/components/schemas/Appointment'
+ *                 total:
+ *                   type: integer
  *       401:
  *         description: Unauthorized
  *       500:
@@ -328,10 +351,10 @@
  *         name: excludeId
  *         schema:
  *           type: string
- *         description: Appointment ID to exclude
+ *         description: Appointment ID to exclude from check
  *     responses:
  *       200:
- *         description: Successful response
+ *         description: Availability check completed
  *         content:
  *           application/json:
  *             schema:
@@ -352,6 +375,9 @@
  *                         type: string
  *                       startTime:
  *                         type: string
+ *                         format: date-time
+ *       400:
+ *         description: Missing startTime or endTime
  *       401:
  *         description: Unauthorized
  *       500:
@@ -372,21 +398,21 @@
  *         schema:
  *           type: string
  *           format: date
- *         description: Start date
+ *         description: Start date (YYYY-MM-DD)
  *       - in: query
  *         name: to
  *         schema:
  *           type: string
  *           format: date
- *         description: End date
+ *         description: End date (YYYY-MM-DD)
  *       - in: query
  *         name: project
  *         schema:
  *           type: string
- *         description: Filter by project
+ *         description: Filter by project ID
  *     responses:
  *       200:
- *         description: Successful response
+ *         description: Statistics retrieved successfully
  *         content:
  *           application/json:
  *             schema:
@@ -416,21 +442,21 @@
  *         schema:
  *           type: integer
  *           default: 7
- *         description: Number of days
+ *         description: Number of days to look ahead
  *       - in: query
  *         name: limit
  *         schema:
  *           type: integer
  *           default: 10
- *         description: Limit results
+ *         description: Maximum number of appointments
  *       - in: query
  *         name: project
  *         schema:
  *           type: string
- *         description: Filter by project
+ *         description: Filter by project ID
  *     responses:
  *       200:
- *         description: Successful response
+ *         description: Upcoming appointments retrieved successfully
  *         content:
  *           application/json:
  *             schema:
@@ -442,6 +468,8 @@
  *                   type: array
  *                   items:
  *                     $ref: '#/components/schemas/Appointment'
+ *                 total:
+ *                   type: integer
  *       401:
  *         description: Unauthorized
  *       500:
@@ -452,7 +480,7 @@
  * @swagger
  * /api/appointments/getAppointments:
  *   get:
- *     summary: Get all appointments
+ *     summary: Get all appointments with filters
  *     tags: [Appointments]
  *     security:
  *       - bearerAuth: []
@@ -479,24 +507,24 @@
  *         name: project
  *         schema:
  *           type: string
- *         description: Filter by project
+ *         description: Filter by project ID
  *       - in: query
  *         name: startDate
  *         schema:
  *           type: string
  *           format: date
- *         description: Start date
+ *         description: Filter by start date
  *       - in: query
  *         name: endDate
  *         schema:
  *           type: string
  *           format: date
- *         description: End date
+ *         description: Filter by end date
  *       - in: query
  *         name: search
  *         schema:
  *           type: string
- *         description: Search term
+ *         description: Search in title, description, notes, location
  *       - in: query
  *         name: attendee
  *         schema:
@@ -518,7 +546,7 @@
  *         description: Sort order
  *     responses:
  *       200:
- *         description: Successful response
+ *         description: Appointments retrieved successfully
  *         content:
  *           application/json:
  *             schema:
@@ -551,7 +579,7 @@
  * @swagger
  * /api/appointments/createAppointment:
  *   post:
- *     summary: Create new appointment
+ *     summary: Create a new appointment
  *     tags: [Appointments]
  *     security:
  *       - bearerAuth: []
@@ -563,7 +591,7 @@
  *             $ref: '#/components/schemas/CreateAppointmentRequest'
  *     responses:
  *       201:
- *         description: Appointment created
+ *         description: Appointment created successfully
  *         content:
  *           application/json:
  *             schema:
@@ -580,7 +608,7 @@
  *       401:
  *         description: Unauthorized
  *       409:
- *         description: Conflict
+ *         description: Time slot conflict
  *       500:
  *         description: Server error
  */
@@ -602,7 +630,7 @@
  *         description: Appointment ID
  *     responses:
  *       200:
- *         description: Successful response
+ *         description: Appointment retrieved successfully
  *         content:
  *           application/json:
  *             schema:
@@ -613,7 +641,7 @@
  *                 data:
  *                   $ref: '#/components/schemas/Appointment'
  *       404:
- *         description: Not found
+ *         description: Appointment not found
  *       401:
  *         description: Unauthorized
  *       500:
@@ -624,7 +652,7 @@
  * @swagger
  * /api/appointments/updateAppointment/{id}:
  *   put:
- *     summary: Update appointment
+ *     summary: Update an appointment
  *     tags: [Appointments]
  *     security:
  *       - bearerAuth: []
@@ -643,7 +671,7 @@
  *             $ref: '#/components/schemas/UpdateAppointmentRequest'
  *     responses:
  *       200:
- *         description: Appointment updated
+ *         description: Appointment updated successfully
  *         content:
  *           application/json:
  *             schema:
@@ -662,9 +690,9 @@
  *       403:
  *         description: Forbidden
  *       404:
- *         description: Not found
+ *         description: Appointment not found
  *       409:
- *         description: Conflict
+ *         description: Time slot conflict
  *       500:
  *         description: Server error
  */
@@ -673,7 +701,7 @@
  * @swagger
  * /api/appointments/deleteAppointment/{id}:
  *   delete:
- *     summary: Delete appointment
+ *     summary: Soft delete an appointment
  *     tags: [Appointments]
  *     security:
  *       - bearerAuth: []
@@ -686,7 +714,7 @@
  *         description: Appointment ID
  *     responses:
  *       200:
- *         description: Appointment deleted
+ *         description: Appointment deleted successfully
  *         content:
  *           application/json:
  *             schema:
@@ -701,7 +729,7 @@
  *       403:
  *         description: Forbidden
  *       404:
- *         description: Not found
+ *         description: Appointment not found
  *       500:
  *         description: Server error
  */
@@ -710,7 +738,7 @@
  * @swagger
  * /api/appointments/rescheduleAppointment/{id}/reschedule:
  *   patch:
- *     summary: Reschedule appointment
+ *     summary: Reschedule an appointment
  *     tags: [Appointments]
  *     security:
  *       - bearerAuth: []
@@ -729,7 +757,7 @@
  *             $ref: '#/components/schemas/RescheduleRequest'
  *     responses:
  *       200:
- *         description: Appointment rescheduled
+ *         description: Appointment rescheduled successfully
  *         content:
  *           application/json:
  *             schema:
@@ -748,9 +776,9 @@
  *       403:
  *         description: Forbidden
  *       404:
- *         description: Not found
+ *         description: Appointment not found
  *       409:
- *         description: Conflict
+ *         description: Time slot conflict
  *       500:
  *         description: Server error
  */
@@ -759,7 +787,7 @@
  * @swagger
  * /api/appointments/cancelAppointment/{id}/cancel:
  *   patch:
- *     summary: Cancel appointment
+ *     summary: Cancel an appointment
  *     tags: [Appointments]
  *     security:
  *       - bearerAuth: []
@@ -777,7 +805,7 @@
  *             $ref: '#/components/schemas/CancelRequest'
  *     responses:
  *       200:
- *         description: Appointment cancelled
+ *         description: Appointment cancelled successfully
  *         content:
  *           application/json:
  *             schema:
@@ -790,13 +818,13 @@
  *                 message:
  *                   type: string
  *       400:
- *         description: Bad request
+ *         description: Cannot cancel
  *       401:
  *         description: Unauthorized
  *       403:
  *         description: Forbidden
  *       404:
- *         description: Not found
+ *         description: Appointment not found
  *       500:
  *         description: Server error
  */
@@ -805,7 +833,7 @@
  * @swagger
  * /api/appointments/completeAppointment/{id}/complete:
  *   patch:
- *     summary: Complete appointment
+ *     summary: Mark appointment as completed
  *     tags: [Appointments]
  *     security:
  *       - bearerAuth: []
@@ -818,7 +846,7 @@
  *         description: Appointment ID
  *     responses:
  *       200:
- *         description: Appointment completed
+ *         description: Appointment completed successfully
  *         content:
  *           application/json:
  *             schema:
@@ -831,13 +859,13 @@
  *                 message:
  *                   type: string
  *       400:
- *         description: Bad request
+ *         description: Cannot complete
  *       401:
  *         description: Unauthorized
  *       403:
  *         description: Forbidden
  *       404:
- *         description: Not found
+ *         description: Appointment not found
  *       500:
  *         description: Server error
  */
@@ -846,7 +874,7 @@
  * @swagger
  * /api/appointments/addAttendee/{id}/attendees:
  *   post:
- *     summary: Add attendee
+ *     summary: Add an attendee to appointment
  *     tags: [Appointments]
  *     security:
  *       - bearerAuth: []
@@ -865,7 +893,7 @@
  *             $ref: '#/components/schemas/AddAttendeeRequest'
  *     responses:
  *       200:
- *         description: Attendee added
+ *         description: Attendee added successfully
  *         content:
  *           application/json:
  *             schema:
@@ -873,6 +901,8 @@
  *               properties:
  *                 success:
  *                   type: boolean
+ *                 message:
+ *                   type: string
  *                 data:
  *                   type: object
  *                   properties:
@@ -887,7 +917,7 @@
  *       403:
  *         description: Forbidden
  *       404:
- *         description: Not found
+ *         description: Appointment not found
  *       500:
  *         description: Server error
  */
@@ -896,7 +926,7 @@
  * @swagger
  * /api/appointments/removeAttendee/{id}/attendees/{attendee}:
  *   delete:
- *     summary: Remove attendee
+ *     summary: Remove an attendee from appointment
  *     tags: [Appointments]
  *     security:
  *       - bearerAuth: []
@@ -915,7 +945,7 @@
  *         description: Attendee to remove
  *     responses:
  *       200:
- *         description: Attendee removed
+ *         description: Attendee removed successfully
  *         content:
  *           application/json:
  *             schema:
@@ -923,6 +953,8 @@
  *               properties:
  *                 success:
  *                   type: boolean
+ *                 message:
+ *                   type: string
  *                 data:
  *                   type: object
  *                   properties:
@@ -937,7 +969,7 @@
  *       403:
  *         description: Forbidden
  *       404:
- *         description: Not found
+ *         description: Appointment or attendee not found
  *       500:
  *         description: Server error
  */
