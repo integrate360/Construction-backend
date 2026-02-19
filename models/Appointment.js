@@ -24,11 +24,6 @@ const AppointmentSchema = new mongoose.Schema(
       index: true,
     },
 
-    endTime: {
-      type: Date,
-      required: true,
-    },
-
     reminderTime: {
       type: Date,
     },
@@ -87,7 +82,7 @@ const AppointmentSchema = new mongoose.Schema(
   {
     timestamps: true,
     versionKey: false,
-  }
+  },
 );
 
 // Indexes

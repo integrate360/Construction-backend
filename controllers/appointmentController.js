@@ -8,7 +8,6 @@ export const createAppointment = async (req, res) => {
       description,
       location,
       startTime,
-      endTime,
       reminderTime,
       notes,
       project,
@@ -24,13 +23,6 @@ export const createAppointment = async (req, res) => {
       });
     }
 
-    if (new Date(endTime) <= new Date(startTime)) {
-      return res.status(400).json({
-        success: false,
-        message: "End time must be after start time",
-      });
-    }
-
     if (reminderTime && new Date(reminderTime) >= new Date(startTime)) {
       return res.status(400).json({
         success: false,
@@ -38,12 +30,12 @@ export const createAppointment = async (req, res) => {
       });
     }
 
+    // Check for conflicting appointments at the same start time
     const conflict = await Appointment.findOne({
       isActive: true,
       status: { $in: ["scheduled", "rescheduled"] },
       createdBy: req.user._id,
-      startTime: { $lt: new Date(endTime) },
-      endTime: { $gt: new Date(startTime) },
+      startTime: new Date(startTime),
     });
 
     if (conflict) {
@@ -58,7 +50,6 @@ export const createAppointment = async (req, res) => {
       description,
       location,
       startTime,
-      endTime,
       reminderTime,
       notes,
       project,
@@ -93,8 +84,8 @@ export const getAppointments = async (req, res) => {
       startDate,
       endDate,
       search,
-      attendee, // Search by attendee name
-      sortBy = "meetingTime",
+      attendee,
+      sortBy = "startTime",
       sortOrder = "asc",
     } = req.query;
 
@@ -118,9 +109,9 @@ export const getAppointments = async (req, res) => {
 
     // Filter by date range
     if (startDate || endDate) {
-      filter.meetingTime = {};
-      if (startDate) filter.meetingTime.$gte = new Date(startDate);
-      if (endDate) filter.meetingTime.$lte = new Date(endDate);
+      filter.startTime = {};
+      if (startDate) filter.startTime.$gte = new Date(startDate);
+      if (endDate) filter.startTime.$lte = new Date(endDate);
     }
 
     // Search in title, notes, location, and attendees
@@ -134,7 +125,6 @@ export const getAppointments = async (req, res) => {
     }
 
     // If user is not super_admin, show only appointments they created
-    // Note: Since attendees are strings (names), we can't filter by user ID
     if (req.user.role !== "super_admin") {
       filter.createdBy = req.user._id;
     }
@@ -146,7 +136,7 @@ export const getAppointments = async (req, res) => {
     const sort = {};
     sort[sortBy] = sortOrder === "asc" ? 1 : -1;
 
-    // Execute query - only populate project and createdBy (User references)
+    // Execute query
     const appointments = await Appointment.find(filter)
       .populate("project", "name description color")
       .populate("createdBy", "name email profilePic role")
@@ -188,8 +178,7 @@ export const getAppointmentById = async (req, res) => {
       });
     }
 
-    // Check if user has access to this appointment (only creator can view)
-    // Since attendees are strings (names), we can't check by user ID
+    // Check if user has access to this appointment
     if (
       req.user.role !== "super_admin" &&
       appointment.createdBy._id.toString() !== req.user._id.toString()
@@ -219,7 +208,6 @@ export const updateAppointment = async (req, res) => {
       description,
       location,
       startTime,
-      endTime,
       reminderTime,
       notes,
       project,
@@ -251,19 +239,11 @@ export const updateAppointment = async (req, res) => {
     const newStartTime = startTime
       ? new Date(startTime)
       : appointment.startTime;
-    const newEndTime = endTime ? new Date(endTime) : appointment.endTime;
 
     if (newStartTime < new Date()) {
       return res.status(400).json({
         success: false,
         message: "Start time must be in the future",
-      });
-    }
-
-    if (newEndTime <= newStartTime) {
-      return res.status(400).json({
-        success: false,
-        message: "End time must be after start time",
       });
     }
 
@@ -279,7 +259,6 @@ export const updateAppointment = async (req, res) => {
       ...(description && { description }),
       ...(location && { location }),
       ...(startTime && { startTime }),
-      ...(endTime && { endTime }),
       ...(reminderTime && { reminderTime }),
       ...(notes && { notes }),
       ...(project && { project }),
@@ -359,7 +338,6 @@ export const rescheduleAppointment = async (req, res) => {
       });
     }
 
-    // ✅ ONLY UPDATE WHAT YOU WANT
     appointment.startTime = newStartTime;
 
     if (reminderTime) {
@@ -404,8 +382,7 @@ export const cancelAppointment = async (req, res) => {
       });
     }
 
-    // Check permission (only creator or super_admin can cancel)
-    // Since attendees are strings, we can't check if current user is an attendee by ID
+    // Check permission
     if (
       req.user.role !== "super_admin" &&
       appointment.createdBy.toString() !== req.user._id.toString()
@@ -458,7 +435,7 @@ export const completeAppointment = async (req, res) => {
       });
     }
 
-    // Check permission (only creator or super_admin)
+    // Check permission
     if (
       req.user.role !== "super_admin" &&
       appointment.createdBy.toString() !== req.user._id.toString()
@@ -510,7 +487,7 @@ export const deleteAppointment = async (req, res) => {
       });
     }
 
-    // Check permission (only creator or super_admin)
+    // Check permission
     if (
       req.user.role !== "super_admin" &&
       appointment.createdBy.toString() !== req.user._id.toString()
@@ -544,17 +521,21 @@ export const getUpcomingAppointments = async (req, res) => {
     const endDate = new Date();
     endDate.setDate(endDate.getDate() + parseInt(days));
 
-    // Since attendees are strings, we can only filter by createdBy
-    const appointments = await Appointment.find({
-      $and: [
-        { isActive: true },
-        { status: "scheduled" },
-        { meetingTime: { $gte: new Date(), $lte: endDate } },
-      ],
-    })
+    const filter = {
+      isActive: true,
+      status: "scheduled",
+      startTime: { $gte: new Date(), $lte: endDate },
+    };
+
+    // If user is not super_admin, show only their appointments
+    if (req.user.role !== "super_admin") {
+      filter.createdBy = req.user._id;
+    }
+
+    const appointments = await Appointment.find(filter)
       .populate("project", "name")
       .populate("createdBy", "name email")
-      .sort({ meetingTime: 1 })
+      .sort({ startTime: 1 })
       .limit(parseInt(limit));
 
     res.status(200).json({
@@ -578,6 +559,7 @@ export const getAppointmentStats = async (req, res) => {
       {
         $match: {
           isActive: true,
+          createdBy: userId,
         },
       },
       {
@@ -596,7 +578,7 @@ export const getAppointmentStats = async (req, res) => {
     const upcomingCount = await Appointment.countDocuments({
       isActive: true,
       status: "scheduled",
-      meetingTime: { $gte: today, $lte: nextWeek },
+      startTime: { $gte: today, $lte: nextWeek },
       createdBy: userId,
     });
 
@@ -605,6 +587,7 @@ export const getAppointmentStats = async (req, res) => {
       scheduled: 0,
       completed: 0,
       cancelled: 0,
+      rescheduled: 0,
       upcoming: upcomingCount,
     };
 
@@ -683,7 +666,7 @@ export const addAttendee = async (req, res) => {
 
 export const removeAttendee = async (req, res) => {
   try {
-    const { attendee } = req.params; // ✅ FIXED
+    const { attendee } = req.params;
 
     const appointment = await Appointment.findById(req.params.id);
 
@@ -713,7 +696,7 @@ export const removeAttendee = async (req, res) => {
       (a) => a.toLowerCase() !== decodedAttendee,
     );
 
-    // ✅ If attendee not found
+    // If attendee not found
     if (appointment.attendees.length === originalLength) {
       return res.status(404).json({
         success: false,
@@ -740,26 +723,21 @@ export const removeAttendee = async (req, res) => {
 
 export const getCalendarAppointments = async (req, res) => {
   try {
-    const { start, end, view = "month", status } = req.query;
+    const { start, end, status } = req.query;
 
     const filter = {
       isActive: true,
     };
 
-    // Date range filter (ONLY if start & end are provided)
+    // Date range filter
     if (start && end) {
       const startDate = new Date(start);
       const endDate = new Date(end);
 
-      filter.$or = [
-        {
-          startTime: { $lte: endDate },
-          endTime: { $gte: startDate },
-        },
-        {
-          startTime: { $gte: startDate, $lte: endDate },
-        },
-      ];
+      filter.startTime = {
+        $gte: startDate,
+        $lte: endDate,
+      };
     }
 
     // Role-based filter
@@ -777,32 +755,36 @@ export const getCalendarAppointments = async (req, res) => {
       .populate("createdBy", "name email profilePic")
       .sort({ startTime: 1 });
 
-    const calendarEvents = appointments.map((appointment) => ({
-      id: appointment._id,
-      title: appointment.title,
-      start: appointment.startTime,
-      end: appointment.endTime,
-      allDay: false,
-      backgroundColor: appointment.color || getStatusColor(appointment.status),
-      borderColor: appointment.color || getStatusColor(appointment.status),
-      extendedProps: {
-        status: appointment.status,
-        location: appointment.location,
-        description: appointment.description,
-        attendees: appointment.attendees,
-        project: appointment.project,
-        notes: appointment.notes,
-        createdBy: appointment.createdBy,
-      },
-    }));
+    // For calendar display, we'll set a default duration of 1 hour
+    const calendarEvents = appointments.map((appointment) => {
+      const endTime = new Date(appointment.startTime);
+      endTime.setHours(endTime.getHours() + 1); // Default 1-hour duration
+
+      return {
+        id: appointment._id,
+        title: appointment.title,
+        start: appointment.startTime,
+        end: endTime,
+        allDay: false,
+        backgroundColor: getStatusColor(appointment.status),
+        borderColor: getStatusColor(appointment.status),
+        extendedProps: {
+          status: appointment.status,
+          location: appointment.location,
+          description: appointment.description,
+          attendees: appointment.attendees,
+          project: appointment.project,
+          notes: appointment.notes,
+          createdBy: appointment.createdBy,
+        },
+      };
+    });
 
     res.status(200).json({
       success: true,
       data: calendarEvents,
       total: calendarEvents.length,
-      range: start && end
-        ? { start, end, view }
-        : null,
+      range: start && end ? { start, end } : null,
     });
   } catch (error) {
     res.status(500).json({
@@ -811,7 +793,6 @@ export const getCalendarAppointments = async (req, res) => {
     });
   }
 };
-
 
 // Helper function to get color based on status
 const getStatusColor = (status) => {
@@ -864,14 +845,9 @@ export const getAgendaView = async (req, res) => {
           hour: "2-digit",
           minute: "2-digit",
         }),
-        endTime: appointment.endTime.toLocaleTimeString([], {
-          hour: "2-digit",
-          minute: "2-digit",
-        }),
         status: appointment.status,
         location: appointment.location,
         project: appointment.project?.name,
-        duration: getDuration(appointment.startTime, appointment.endTime),
       });
     });
 
@@ -888,39 +864,24 @@ export const getAgendaView = async (req, res) => {
   }
 };
 
-const getDuration = (start, end) => {
-  const diff = (end - start) / (1000 * 60); // minutes
-  if (diff < 60) return `${diff} minutes`;
-  const hours = Math.floor(diff / 60);
-  const minutes = diff % 60;
-  return minutes > 0 ? `${hours}h ${minutes}m` : `${hours} hours`;
-};
-
 export const checkAvailability = async (req, res) => {
   try {
-    const { startTime, endTime, excludeId } = req.query;
+    const { startTime, excludeId } = req.query;
 
-    if (!startTime || !endTime) {
+    if (!startTime) {
       return res.status(400).json({
         success: false,
-        message: "Start time and end time are required",
+        message: "Start time is required",
       });
     }
 
     const start = new Date(startTime);
-    const end = new Date(endTime);
 
-    // Check for overlapping appointments
+    // Check for conflicting appointments at the same time
     const filter = {
       isActive: true,
       status: { $in: ["scheduled", "rescheduled"] },
-      $or: [
-        // Overlapping conditions
-        {
-          startTime: { $lt: end },
-          endTime: { $gt: start },
-        },
-      ],
+      startTime: start,
     };
 
     // Exclude current appointment when checking
@@ -947,7 +908,6 @@ export const checkAvailability = async (req, res) => {
         id: apt._id,
         title: apt.title,
         startTime: apt.startTime,
-        endTime: apt.endTime,
         createdBy: apt.createdBy?.name,
       })),
     });
