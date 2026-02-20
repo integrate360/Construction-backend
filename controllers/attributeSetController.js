@@ -46,6 +46,9 @@ export const getAllAttributeSets = async (req, res) => {
 
     const attributeSets = await AttributeSet.find(filter)
       .populate("attributes")
+       .populate(
+      "createdBy"
+    )
       .sort({ createdAt: -1 });
 
     res.status(200).json({
@@ -67,8 +70,12 @@ export const getAllAttributeSets = async (req, res) => {
  */
 export const getAttributeSetById = async (req, res) => {
   try {
-    const attributeSet = await AttributeSet.findById(req.params.id).populate(
+    const attributeSet = await AttributeSet.findById(req.params.id)
+    .populate(
       "attributes"
+    )
+    .populate(
+      "createdBy"
     );
 
     if (!attributeSet) {
