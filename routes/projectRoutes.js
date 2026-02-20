@@ -21,7 +21,7 @@ router.get("/getProjects", getProjects);
 router.post("/createProject", createProject);
 router.get("/stats", getProjectStats);
 router.get("/:id", getProjectById);
-router.put("/:id", updateProject);
+router.put("/updateProject/:id", updateProject);
 router.delete("/:id", deleteProject);
 router.patch("/:id/approval", updateApprovalStatus);
 router.patch("/:id/phases/:phaseIndex", updatePhaseCompletion);

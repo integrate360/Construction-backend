@@ -247,7 +247,6 @@ export const getProjectById = async (req, res) => {
 
 export const updateProject = async (req, res) => {
   try {
-    // client and labour cannot update anything
     if (req.user.role === "client" || req.user.role === "labour") {
       return res.status(403).json({
         success: false,
@@ -256,7 +255,6 @@ export const updateProject = async (req, res) => {
     }
 
     const project = await Project.findById(req.params.id);
-
     if (!project) {
       return res.status(404).json({
         success: false,
@@ -264,6 +262,7 @@ export const updateProject = async (req, res) => {
       });
     }
 
+    // 🔐 Access check
     if (!canAccessProject(req.user, project)) {
       return res.status(403).json({
         success: false,
@@ -271,27 +270,94 @@ export const updateProject = async (req, res) => {
       });
     }
 
-    // If updating AttributeSet, verify it exists
+    /* ===============================
+       VALIDATIONS (ADMIN ONLY)
+    =============================== */
+
+    // ✅ Validate client assignment
+    if (req.body.client !== undefined) {
+      if (!isAdmin(req.user.role)) {
+        return res.status(403).json({
+          success: false,
+          message: "Only admins can assign client",
+        });
+      }
+
+      if (req.body.client) {
+        const clientExists = await User.findById(req.body.client);
+        if (!clientExists) {
+          return res.status(404).json({
+            success: false,
+            message: "Client not found",
+          });
+        }
+
+        if (clientExists.role !== "client") {
+          return res.status(400).json({
+            success: false,
+            message: "Assigned user must have the 'client' role",
+          });
+        }
+      }
+    }
+
+    // ✅ Validate project manager assignment
+    if (req.body.projectManager !== undefined) {
+      if (!isAdmin(req.user.role)) {
+        return res.status(403).json({
+          success: false,
+          message: "Only admins can assign project manager",
+        });
+      }
+
+      if (req.body.projectManager) {
+        const pmExists = await User.findById(req.body.projectManager);
+        if (!pmExists) {
+          return res.status(404).json({
+            success: false,
+            message: "Project Manager not found",
+          });
+        }
+
+        if (pmExists.role !== "site_manager") {
+          return res.status(400).json({
+            success: false,
+            message:
+              "Assigned project manager must have the 'site_manager' role",
+          });
+        }
+      }
+    }
+
+    // ✅ Validate AttributeSet (array safe)
     if (req.body.AttributeSet) {
-      const attributeSetExists = await AttributeSet.findById(
-        req.body.AttributeSet,
-      );
-      if (!attributeSetExists) {
+      const attributeSetIds = Array.isArray(req.body.AttributeSet)
+        ? req.body.AttributeSet
+        : [req.body.AttributeSet];
+
+      const count = await AttributeSet.countDocuments({
+        _id: { $in: attributeSetIds },
+      });
+
+      if (count !== attributeSetIds.length) {
         return res.status(404).json({
           success: false,
-          message: "AttributeSet not found",
+          message: "One or more AttributeSets not found",
         });
       }
     }
 
-    // Admins can update all fields, site_manager only operational fields
+    /* ===============================
+       FIELD PERMISSIONS
+    =============================== */
+
     const adminFields = [
       "projectName",
       "siteName",
       "location",
       "client",
       "projectManager",
-      "AttributeSet", // Add AttributeSet to admin fields
+      "AttributeSet",
       "startDate",
       "expectedEndDate",
       "budget",
@@ -313,40 +379,49 @@ export const updateProject = async (req, res) => {
       }
     });
 
-    // Auto-calculate progress if phases are updated
+    /* ===============================
+       AUTO PROGRESS CALCULATION
+    =============================== */
+
     if (req.body.phases) {
       const totalPhases = project.phases.length;
       if (totalPhases > 0) {
-        const completedPhases = project.phases.filter(
-          (phase) => phase.isCompleted,
+        const completed = project.phases.filter(
+          (p) => p.isCompleted,
         ).length;
-        project.progressPercentage = (completedPhases / totalPhases) * 100;
 
-        if (project.progressPercentage === 0) {
-          project.projectStatus = "not_started";
-        } else if (project.progressPercentage === 100) {
-          project.projectStatus = "completed";
-        } else {
-          project.projectStatus = "running";
-        }
+        project.progressPercentage = (completed / totalPhases) * 100;
+
+        project.projectStatus =
+          project.progressPercentage === 0
+            ? "not_started"
+            : project.progressPercentage === 100
+            ? "completed"
+            : "running";
       }
     }
 
     const updatedProject = await project.save();
 
-    // Populate the updated project
+    /* ===============================
+       RESPONSE
+    =============================== */
+
     const populatedProject = await Project.findById(updatedProject._id)
       .populate("client", "name email phoneNumber")
       .populate("projectManager", "name email phoneNumber")
       .populate("createdBy", "name email")
-      .populate("AttributeSet");
+      .populate({
+        path: "AttributeSet",
+        populate: { path: "attributes" },
+      });
 
-    res.json({
+    return res.json({
       success: true,
       data: populatedProject,
     });
   } catch (error) {
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: error.message,
     });
@@ -651,8 +726,6 @@ export const getProjectStats = async (req, res) => {
         message: "Only admins can view project statistics",
       });
     }
-
-    // saas_admin sees all, super_admin sees only their own
     const matchStage = isGlobalAdmin(req.user.role)
       ? {}
       : { createdBy: req.user._id };
