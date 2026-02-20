@@ -24,6 +24,7 @@ export const createProject = async (req, res) => {
       siteName,
       location,
       client, // optional
+      labour, // optional
       projectManager, // optional
       AttributeSet: attributeSetIds,
       startDate,
@@ -107,6 +108,7 @@ export const createProject = async (req, res) => {
       siteName,
       location,
       client: client || null,
+      labour: labour || null,
       projectManager: projectManager || null,
       createdBy: req.user._id,
       AttributeSet: attributeSetArray,
@@ -121,6 +123,7 @@ export const createProject = async (req, res) => {
     const populatedProject = await Project.findById(project._id)
       .populate("client", "name email phoneNumber")
       .populate("projectManager", "name email phoneNumber")
+      .populate("labour", "name email phoneNumber")
       .populate("createdBy", "name email")
       .populate("AttributeSet");
 
@@ -145,6 +148,7 @@ export const getProjects = async (req, res) => {
       siteStatus,
       approvalStatus,
       client,
+      labour,
       projectManager,
       search,
       sortBy = "createdAt",
@@ -179,6 +183,7 @@ export const getProjects = async (req, res) => {
     const projects = await Project.find(filter)
       .populate("client", "name email phoneNumber")
       .populate("projectManager", "name email phoneNumber")
+      .populate("labour", "name email phoneNumber")
       .populate("createdBy", "name email")
       .populate({
         path: "AttributeSet",
@@ -356,6 +361,7 @@ export const updateProject = async (req, res) => {
       "siteName",
       "location",
       "client",
+      "labour",
       "projectManager",
       "AttributeSet",
       "startDate",
@@ -410,6 +416,7 @@ export const updateProject = async (req, res) => {
     const populatedProject = await Project.findById(updatedProject._id)
       .populate("client", "name email phoneNumber")
       .populate("projectManager", "name email phoneNumber")
+      .populate("labour", "name email phoneNumber")
       .populate("createdBy", "name email")
       .populate({
         path: "AttributeSet",

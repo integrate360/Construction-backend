@@ -90,7 +90,7 @@ export const getAppointments = async (req, res) => {
     } = req.query;
 
     // Build filter object
-    const filter = { };
+    const filter = {};
 
     // Filter by status
     if (status) {
@@ -307,7 +307,7 @@ export const updateAppointment = async (req, res) => {
       {
         new: true, // cleaner than returnDocument
         runValidators: true,
-      }
+      },
     )
       .populate("project", "name description color")
       .populate("createdBy", "name email profilePic");
@@ -603,7 +603,7 @@ export const getAppointmentStats = async (req, res) => {
 
     // Build the match filter based on role
     const matchFilter = {};
-    
+
     // Role-based filter
     if (userRole !== "saas_admin") {
       // For non-saas_admin users, filter by createdBy
@@ -634,7 +634,7 @@ export const getAppointmentStats = async (req, res) => {
       status: "scheduled",
       startTime: { $gte: today, $lte: nextWeek },
     };
-    
+
     if (userRole !== "saas_admin") {
       upcomingFilter.createdBy = userId;
     }
@@ -754,12 +754,14 @@ export const removeAttendee = async (req, res) => {
       });
     }
 
-    const decodedAttendee = decodeURIComponent(req.params.attendee).toLowerCase();
+    const decodedAttendee = decodeURIComponent(
+      req.params.attendee,
+    ).toLowerCase();
 
     const originalLength = appointment.attendees.length;
 
     appointment.attendees = appointment.attendees.filter(
-      (a) => a.toLowerCase() !== decodedAttendee
+      (a) => a.toLowerCase() !== decodedAttendee,
     );
 
     if (appointment.attendees.length === originalLength) {
@@ -981,4 +983,3 @@ export const checkAvailability = async (req, res) => {
     });
   }
 };
-
