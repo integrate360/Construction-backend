@@ -19,13 +19,17 @@ router.use(authMiddleware);
 
 router.get("/getProjects", getProjects);
 router.post("/createProject", createProject);
-router.get("/stats", getProjectStats);
-router.get("/:id", getProjectById);
 router.put("/updateProject/:id", updateProject);
-router.delete("/:id", deleteProject);
-router.patch("/:id/approval", updateApprovalStatus);
-router.patch("/:id/phases/:phaseIndex", updatePhaseCompletion);
-router.post("/:id/documents", addDocument);
-router.delete("/:id/documents/:docId", removeDocument);
+router.get("/getProjectStats/stats", getProjectStats);
+router.get("/getProjectById/:id", getProjectById);
+
+router.delete("/deleteProject/:id", deleteProject);
+router.patch("/updateApprovalStatus/:id/approval", updateApprovalStatus);
+router.patch(
+  "/updatePhaseCompletion/:id/phases/:phaseIndex",
+  updatePhaseCompletion,
+);
+router.post("/addDocument/:id/documents", addDocument);
+router.delete("/removeDocument/:id/documents/:docId", removeDocument);
 
 export default router;
