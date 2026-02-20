@@ -33,19 +33,28 @@ export const createAttribute = async (req, res) => {
 
 export const getAllAttributes = async (req, res) => {
   try {
-    console.log("👉 Get All Attributes User:", {
-      id: req.user._id,
-      role: req.user.role,
-    });
+    console.log("👉 getAllAttributes called");
+    console.log("👤 User ID:", req.user._id);
+    console.log("🔑 User Role:", req.user.role);
 
     let filter = {};
 
-    // saas_admin → all access
-    if (req.user.role !== "saas_admin") {
+    // super_admin → only own records
+    if (req.user.role === "super_admin") {
       filter.createdBy = req.user._id;
+      console.log("🔍 Applied filter: createdBy =", req.user._id);
     }
 
-    const attributes = await Attribute.find(filter).sort({ createdAt: -1 });
+    // saas_admin → no filter (full access)
+    if (req.user.role === "saas_admin") {
+      console.log("🔓 saas_admin detected → full access");
+    }
+
+    const attributes = await Attribute.find(filter)
+      .sort({ createdAt: -1 })
+      .populate("createdBy", "name email role");
+
+    console.log("📦 Total attributes found:", attributes.length);
 
     res.status(200).json({
       success: true,
@@ -54,29 +63,44 @@ export const getAllAttributes = async (req, res) => {
     });
   } catch (error) {
     console.error("🔥 getAllAttributes error:", error);
+
     res.status(500).json({
       success: false,
-      message: error.message,
+      message: "Failed to fetch attributes",
     });
   }
 };
 
 export const getAttributeById = async (req, res) => {
   try {
-    console.log("👉 Get Attribute By ID:", req.params.id);
+    const { id } = req.params;
 
-    const attribute = await Attribute.findById(req.params.id);
+    console.log("👉 getAttributeById called");
+    console.log("🆔 Attribute ID:", id);
+    console.log("👤 User ID:", req.user._id);
+    console.log("🔑 User Role:", req.user.role);
+
+    const attribute = await Attribute.findById(id).populate(
+      "createdBy",
+      "name email role"
+    );
 
     if (!attribute) {
+      console.warn("⚠️ Attribute not found");
       return res.status(404).json({
         success: false,
         message: "Attribute not found",
       });
     }
 
-    // saas_admin → full access
-    if (req.user.role !== "saas_admin") {
-      if (attribute.createdBy.toString() !== req.user._id.toString()) {
+    console.log("✅ Attribute found");
+    console.log("👨‍💼 Created By:", attribute.createdBy._id.toString());
+
+    // super_admin → only own attribute
+    if (req.user.role === "super_admin") {
+      if (attribute.createdBy._id.toString() !== req.user._id.toString()) {
+        console.warn("⛔ Access denied: Not owner");
+
         return res.status(403).json({
           success: false,
           message: "You are not allowed to view this attribute",
@@ -84,12 +108,16 @@ export const getAttributeById = async (req, res) => {
       }
     }
 
+    // saas_admin → full access
+    console.log("🔓 Access granted");
+
     res.status(200).json({
       success: true,
       data: attribute,
     });
   } catch (error) {
     console.error("🔥 getAttributeById error:", error);
+
     res.status(400).json({
       success: false,
       message: "Invalid Attribute ID",
