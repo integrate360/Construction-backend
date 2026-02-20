@@ -16,7 +16,7 @@ const buildRoleFilter = (user = {}) => {
 
   // site_manager sees only projects assigned to them
   if (user.role === "site_manager") {
-    return { projectManager: user._id };
+    return { site_manager: user._id };
   }
 
   // client sees only their own projects
@@ -26,7 +26,7 @@ const buildRoleFilter = (user = {}) => {
 
   // labour sees projects managed by their associated site_manager
   if (user.role === "labour") {
-    return { projectManager: user.associatedWithUser };
+    return { site_manager: user.associatedWithUser };
   }
 
   // No access by default
@@ -42,7 +42,7 @@ const canAccessProject = (user, project) => {
   }
 
   if (user.role === "site_manager") {
-    const pm = project.projectManager?._id ?? project.projectManager;
+    const pm = project.site_manager?._id ?? project.site_manager;
     return pm?.toString() === user._id.toString();
   }
 
@@ -52,7 +52,7 @@ const canAccessProject = (user, project) => {
   }
 
   if (user.role === "labour") {
-    const pm = project.projectManager?._id ?? project.projectManager;
+    const pm = project.site_manager?._id ?? project.site_manager;
     return pm?.toString() === user.associatedWithUser?.toString();
   }
 

@@ -66,7 +66,7 @@ const projectSchema = new mongoose.Schema(
       ref: "User",
     },
 
-    projectManager: {
+    site_manager: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
     },

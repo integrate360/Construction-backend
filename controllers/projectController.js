@@ -25,7 +25,7 @@ export const createProject = async (req, res) => {
       location,
       client, // optional
       labour, // optional
-      projectManager, // optional
+      site_manager, // optional
       AttributeSet: attributeSetIds,
       startDate,
       expectedEndDate,
@@ -68,8 +68,8 @@ export const createProject = async (req, res) => {
     }
 
     // ✅ Validate project manager ONLY if provided
-    if (projectManager) {
-      const pmExists = await User.findById(projectManager);
+    if (site_manager) {
+      const pmExists = await User.findById(site_manager);
       if (!pmExists) {
         return res.status(404).json({
           success: false,
@@ -109,7 +109,7 @@ export const createProject = async (req, res) => {
       location,
       client: client || null,
       labour: labour || null,
-      projectManager: projectManager || null,
+      site_manager: site_manager || null,
       createdBy: req.user._id,
       AttributeSet: attributeSetArray,
       startDate,
@@ -122,7 +122,7 @@ export const createProject = async (req, res) => {
     // ✅ Populate response
     const populatedProject = await Project.findById(project._id)
       .populate("client", "name email phoneNumber")
-      .populate("projectManager", "name email phoneNumber")
+      .populate("site_manager", "name email phoneNumber")
       .populate("labour", "name email phoneNumber")
       .populate("createdBy", "name email")
       .populate("AttributeSet");
@@ -149,7 +149,7 @@ export const getProjects = async (req, res) => {
       approvalStatus,
       client,
       labour,
-      projectManager,
+      site_manager,
       search,
       sortBy = "createdAt",
       sortOrder = "desc",
@@ -162,10 +162,10 @@ export const getProjects = async (req, res) => {
     if (siteStatus) filter.siteStatus = siteStatus;
     if (approvalStatus) filter.approvalStatus = approvalStatus;
 
-    // Only admins can additionally filter by client/projectManager from query
+    // Only admins can additionally filter by client/site_manager from query
     if (isAdmin(req.user.role)) {
       if (client) filter.client = client;
-      if (projectManager) filter.projectManager = projectManager;
+      if (site_manager) filter.site_manager = site_manager;
     }
 
     // Search filter
@@ -182,7 +182,7 @@ export const getProjects = async (req, res) => {
 
     const projects = await Project.find(filter)
       .populate("client", "name email phoneNumber")
-      .populate("projectManager", "name email phoneNumber")
+      .populate("site_manager", "name email phoneNumber")
       .populate("labour", "name email phoneNumber")
       .populate("createdBy", "name email")
       .populate({
@@ -220,7 +220,7 @@ export const getProjectById = async (req, res) => {
   try {
     const project = await Project.findById(req.params.id)
       .populate("client", "name email phoneNumber")
-      .populate("projectManager", "name email phoneNumber")
+      .populate("site_manager", "name email phoneNumber")
       .populate("labour", "name email phoneNumber")
       .populate("createdBy", "name email")
       .populate("AttributeSet"); // Populate AttributeSet
@@ -302,7 +302,7 @@ export const updateProject = async (req, res) => {
     }
 
     // ✅ Project Manager validation
-    if (req.body.projectManager !== undefined) {
+    if (req.body.site_manager !== undefined) {
       if (!isAdmin(req.user.role)) {
         return res.status(403).json({
           success: false,
@@ -310,8 +310,8 @@ export const updateProject = async (req, res) => {
         });
       }
 
-      if (req.body.projectManager) {
-        const pm = await User.findById(req.body.projectManager);
+      if (req.body.site_manager) {
+        const pm = await User.findById(req.body.site_manager);
         if (!pm || pm.role !== "site_manager") {
           return res.status(400).json({
             success: false,
@@ -376,7 +376,7 @@ export const updateProject = async (req, res) => {
       "location",
       "client",
       "labour",
-      "projectManager",
+      "site_manager",
       "AttributeSet",
       "startDate",
       "expectedEndDate",
@@ -426,7 +426,7 @@ export const updateProject = async (req, res) => {
 
     const populatedProject = await Project.findById(project._id)
       .populate("client", "name email phoneNumber")
-      .populate("projectManager", "name email phoneNumber")
+      .populate("site_manager", "name email phoneNumber")
       .populate("labour", "name email phoneNumber")
       .populate("createdBy", "name email")
       .populate({
@@ -486,7 +486,7 @@ export const updateApprovalStatus = async (req, res) => {
     // Populate the updated project
     const populatedProject = await Project.findById(project._id)
       .populate("client", "name email phoneNumber")
-      .populate("projectManager", "name email phoneNumber")
+      .populate("site_manager", "name email phoneNumber")
       .populate("createdBy", "name email")
       .populate("AttributeSet");
 
@@ -576,7 +576,7 @@ export const updatePhaseCompletion = async (req, res) => {
     // Populate the updated project
     const populatedProject = await Project.findById(project._id)
       .populate("client", "name email phoneNumber")
-      .populate("projectManager", "name email phoneNumber")
+      .populate("site_manager", "name email phoneNumber")
       .populate("createdBy", "name email")
       .populate("AttributeSet");
 
