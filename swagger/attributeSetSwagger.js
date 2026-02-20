@@ -2,7 +2,7 @@
  * @swagger
  * tags:
  *   name: Attribute Sets
- *   description: Attribute Set management APIs
+ *   description: Attribute Set management APIs (saas_admin = all access, super_admin = own data)
  */
 
 /**
@@ -11,8 +11,6 @@
  *   schemas:
  *     AttributeSet:
  *       type: object
- *       required:
- *         - name
  *       properties:
  *         _id:
  *           type: string
@@ -25,6 +23,15 @@
  *           items:
  *             type: string
  *             example: 65f2b1e9c7a1a23b45678901
+ *         createdBy:
+ *           type: string
+ *           example: 65f29abde4a1234567891111
+ *         createdAt:
+ *           type: string
+ *           format: date-time
+ *         updatedAt:
+ *           type: string
+ *           format: date-time
  *
  *     CreateAttributeSetRequest:
  *       type: object
@@ -33,17 +40,19 @@
  *       properties:
  *         name:
  *           type: string
- *           example: Electrical Set
+ *           example: Electrical Materials Set
  *         attributes:
  *           type: array
  *           items:
  *             type: string
+ *             example: 65f2b1e9c7a1a23b45678901
  *
  *     UpdateAttributeSetRequest:
  *       type: object
  *       properties:
  *         name:
  *           type: string
+ *           example: Updated Flooring Set
  *         attributes:
  *           type: array
  *           items:
@@ -55,7 +64,10 @@
  * /api/attribute-sets/create:
  *   post:
  *     tags: [Attribute Sets]
- *     summary: Create attribute set
+ *     summary: Create a new attribute set
+ *     description: |
+ *       - **saas_admin**: Can create attribute sets for the system  
+ *       - **super_admin**: Creates attribute sets owned by them
  *     security:
  *       - bearerAuth: []
  *     requestBody:
@@ -66,9 +78,11 @@
  *             $ref: '#/components/schemas/CreateAttributeSetRequest'
  *     responses:
  *       201:
- *         description: Attribute set created
- *       403:
- *         description: Forbidden
+ *         description: Attribute set created successfully
+ *       401:
+ *         description: Unauthorized
+ *       500:
+ *         description: Server error
  */
 
 /**
@@ -77,11 +91,18 @@
  *   get:
  *     tags: [Attribute Sets]
  *     summary: Get all attribute sets
+ *     description: |
+ *       - **saas_admin**: Gets all attribute sets  
+ *       - **super_admin**: Gets only attribute sets created by them
  *     security:
  *       - bearerAuth: []
  *     responses:
  *       200:
  *         description: Attribute sets list
+ *       401:
+ *         description: Unauthorized
+ *       500:
+ *         description: Server error
  */
 
 /**
@@ -101,8 +122,12 @@
  *     responses:
  *       200:
  *         description: Attribute set details
+ *       403:
+ *         description: Forbidden
  *       404:
- *         description: Not found
+ *         description: Attribute set not found
+ *       500:
+ *         description: Server error
  */
 
 /**
@@ -110,7 +135,10 @@
  * /api/attribute-sets/update/{id}:
  *   put:
  *     tags: [Attribute Sets]
- *     summary: Update attribute set
+ *     summary: Update an attribute set
+ *     description: |
+ *       - **saas_admin**: Can update any attribute set  
+ *       - **super_admin**: Can update only their own attribute sets
  *     security:
  *       - bearerAuth: []
  *     parameters:
@@ -127,7 +155,11 @@
  *             $ref: '#/components/schemas/UpdateAttributeSetRequest'
  *     responses:
  *       200:
- *         description: Attribute set updated
+ *         description: Attribute set updated successfully
+ *       403:
+ *         description: Forbidden
+ *       404:
+ *         description: Attribute set not found
  */
 
 /**
@@ -135,7 +167,10 @@
  * /api/attribute-sets/delete/{id}:
  *   delete:
  *     tags: [Attribute Sets]
- *     summary: Delete attribute set
+ *     summary: Delete an attribute set
+ *     description: |
+ *       - **saas_admin**: Can delete any attribute set  
+ *       - **super_admin**: Can delete only their own attribute sets
  *     security:
  *       - bearerAuth: []
  *     parameters:
@@ -146,5 +181,9 @@
  *           type: string
  *     responses:
  *       200:
- *         description: Attribute set deleted
+ *         description: Attribute set deleted successfully
+ *       403:
+ *         description: Forbidden
+ *       404:
+ *         description: Attribute set not found
  */

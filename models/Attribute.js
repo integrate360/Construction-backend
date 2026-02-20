@@ -47,8 +47,6 @@ const attributeSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
-
-    // 🔑 Ownership
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",

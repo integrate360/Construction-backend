@@ -2,7 +2,7 @@
  * @swagger
  * tags:
  *   name: Attributes
- *   description: Material Attribute Management APIs
+ *   description: Material Attribute Management APIs (saas_admin = all access, super_admin = own data)
  */
 
 /**
@@ -11,9 +11,6 @@
  *   schemas:
  *     Attribute:
  *       type: object
- *       required:
- *         - label
- *         - type
  *       properties:
  *         _id:
  *           type: string
@@ -23,38 +20,19 @@
  *           example: UltraTech Cement
  *         type:
  *           type: string
- *           enum:
- *             - cement
- *             - sand
- *             - aggregate
- *             - steel
- *             - brick
- *             - block
- *             - concrete
- *             - wood
- *             - plywood
- *             - tiles
- *             - marble
- *             - granite
- *             - paint
- *             - electrical
- *             - plumbing
- *             - sanitary
- *             - glass
- *             - aluminium
- *             - hardware
- *             - chemicals
- *             - waterproofing
- *             - adhesive
- *             - flooring
- *             - roofing
- *             - false_ceiling
- *             - fixtures
- *             - tools
- *             - miscellaneous
+ *           example: cement
  *         pricing:
  *           type: number
  *           example: 450
+ *         createdBy:
+ *           type: string
+ *           example: 65f29abde4a1234567891111
+ *         createdAt:
+ *           type: string
+ *           format: date-time
+ *         updatedAt:
+ *           type: string
+ *           format: date-time
  *
  *     CreateAttributeRequest:
  *       type: object
@@ -91,7 +69,10 @@
  * /api/attributes/createAttribute:
  *   post:
  *     tags: [Attributes]
- *     summary: Create new attribute
+ *     summary: Create a new attribute
+ *     description: |
+ *       - **saas_admin**: Can create attributes for the system  
+ *       - **super_admin**: Creates attributes owned by them
  *     security:
  *       - bearerAuth: []
  *     requestBody:
@@ -107,8 +88,8 @@
  *         description: Validation error
  *       401:
  *         description: Unauthorized
- *       403:
- *         description: Forbidden
+ *       500:
+ *         description: Server error
  */
 
 /**
@@ -117,6 +98,9 @@
  *   get:
  *     tags: [Attributes]
  *     summary: Get all attributes
+ *     description: |
+ *       - **saas_admin**: Gets all attributes  
+ *       - **super_admin**: Gets only attributes created by them
  *     security:
  *       - bearerAuth: []
  *     responses:
@@ -130,6 +114,8 @@
  *                 $ref: '#/components/schemas/Attribute'
  *       401:
  *         description: Unauthorized
+ *       500:
+ *         description: Server error
  */
 
 /**
@@ -153,8 +139,12 @@
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/Attribute'
+ *       403:
+ *         description: Forbidden
  *       404:
  *         description: Attribute not found
+ *       500:
+ *         description: Server error
  */
 
 /**
@@ -163,6 +153,9 @@
  *   put:
  *     tags: [Attributes]
  *     summary: Update attribute by ID
+ *     description: |
+ *       - **saas_admin**: Can update any attribute  
+ *       - **super_admin**: Can update only their own attributes
  *     security:
  *       - bearerAuth: []
  *     parameters:
@@ -180,6 +173,8 @@
  *     responses:
  *       200:
  *         description: Attribute updated successfully
+ *       403:
+ *         description: Forbidden
  *       404:
  *         description: Attribute not found
  */
@@ -190,6 +185,9 @@
  *   delete:
  *     tags: [Attributes]
  *     summary: Delete attribute by ID
+ *     description: |
+ *       - **saas_admin**: Can delete any attribute  
+ *       - **super_admin**: Can delete only their own attributes
  *     security:
  *       - bearerAuth: []
  *     parameters:
@@ -201,6 +199,8 @@
  *     responses:
  *       200:
  *         description: Attribute deleted successfully
+ *       403:
+ *         description: Forbidden
  *       404:
  *         description: Attribute not found
  */

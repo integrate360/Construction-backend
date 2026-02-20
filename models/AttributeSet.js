@@ -15,8 +15,6 @@ const attributeSetSchema = new mongoose.Schema(
         required: true,
       },
     ],
-
-    // 🔑 Ownership
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
