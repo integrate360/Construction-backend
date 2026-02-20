@@ -331,6 +331,9 @@ export const updateAppointment = async (req, res) => {
 
 export const rescheduleAppointment = async (req, res) => {
   try {
+    console.log("👉 Reschedule Appointment ID:", req.params.id);
+    console.log("👉 User:", req.user);
+
     const { startTime, reminderTime } = req.body;
 
     if (!startTime) {
@@ -341,8 +344,9 @@ export const rescheduleAppointment = async (req, res) => {
     }
 
     const appointment = await Appointment.findById(req.params.id);
+    console.log("👉 Appointment:", appointment);
 
-    if (!appointment || !appointment.isActive) {
+    if (!appointment) {
       return res.status(404).json({
         success: false,
         message: "Appointment not found",
@@ -352,15 +356,15 @@ export const rescheduleAppointment = async (req, res) => {
     // Permission check
     if (
       req.user.role !== "super_admin" &&
+      req.user.role !== "saas_admin" &&
       appointment.createdBy.toString() !== req.user._id.toString()
     ) {
       return res.status(403).json({
         success: false,
-        message: "Only the creator can reschedule this appointment",
+        message: "You don't have permission to reschedule this appointment",
       });
     }
 
-    // Cannot reschedule completed or cancelled
     if (["completed", "cancelled"].includes(appointment.status)) {
       return res.status(400).json({
         success: false,
@@ -377,62 +381,54 @@ export const rescheduleAppointment = async (req, res) => {
       });
     }
 
-    appointment.startTime = newStartTime;
-
-    if (reminderTime) {
-      if (new Date(reminderTime) >= newStartTime) {
-        return res.status(400).json({
-          success: false,
-          message: "Reminder time must be before start time",
-        });
-      }
-      appointment.reminderTime = reminderTime;
+    if (reminderTime && new Date(reminderTime) >= newStartTime) {
+      return res.status(400).json({
+        success: false,
+        message: "Reminder time must be before start time",
+      });
     }
 
+    appointment.startTime = newStartTime;
+    if (reminderTime) appointment.reminderTime = reminderTime;
     appointment.status = "rescheduled";
 
     await appointment.save();
 
-    const updatedAppointment = await Appointment.findById(appointment._id)
-      .populate("project", "name description")
-      .populate("createdBy", "name email");
-
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       message: "Appointment rescheduled successfully",
-      data: updatedAppointment,
+      data: appointment,
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    console.error("🔥 rescheduleAppointment error:", error);
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
 export const cancelAppointment = async (req, res) => {
   try {
+    console.log("👉 Cancel Appointment ID:", req.params.id);
+
     const appointment = await Appointment.findById(req.params.id);
 
-    if (!appointment || !appointment.isActive) {
+    if (!appointment) {
       return res.status(404).json({
         success: false,
         message: "Appointment not found",
       });
     }
 
-    // Check permission
     if (
       req.user.role !== "super_admin" &&
+      req.user.role !== "saas_admin" &&
       appointment.createdBy.toString() !== req.user._id.toString()
     ) {
       return res.status(403).json({
         success: false,
-        message: "Only the creator can cancel this appointment",
+        message: "You don't have permission to cancel this appointment",
       });
     }
 
-    // Check if already completed/cancelled
     if (appointment.status === "completed") {
       return res.status(400).json({
         success: false,
@@ -450,38 +446,38 @@ export const cancelAppointment = async (req, res) => {
     appointment.status = "cancelled";
     await appointment.save();
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       message: "Appointment cancelled successfully",
       data: appointment,
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    console.error("🔥 cancelAppointment error:", error);
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
 export const completeAppointment = async (req, res) => {
   try {
+    console.log("👉 Complete Appointment ID:", req.params.id);
+
     const appointment = await Appointment.findById(req.params.id);
 
-    if (!appointment || !appointment.isActive) {
+    if (!appointment) {
       return res.status(404).json({
         success: false,
         message: "Appointment not found",
       });
     }
 
-    // Check permission
     if (
       req.user.role !== "super_admin" &&
+      req.user.role !== "saas_admin" &&
       appointment.createdBy.toString() !== req.user._id.toString()
     ) {
       return res.status(403).json({
         success: false,
-        message: "Only the creator can mark appointment as completed",
+        message: "You don't have permission to complete this appointment",
       });
     }
 
@@ -495,23 +491,21 @@ export const completeAppointment = async (req, res) => {
     if (appointment.status === "completed") {
       return res.status(400).json({
         success: false,
-        message: "Appointment is already completed",
+        message: "Appointment already completed",
       });
     }
 
     appointment.status = "completed";
     await appointment.save();
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       message: "Appointment marked as completed",
       data: appointment,
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    console.error("🔥 completeAppointment error:", error);
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -738,37 +732,36 @@ export const addAttendee = async (req, res) => {
 
 export const removeAttendee = async (req, res) => {
   try {
-    const { attendee } = req.params;
+    console.log("👉 Remove Attendee:", req.params.attendee);
 
     const appointment = await Appointment.findById(req.params.id);
 
-    if (!appointment || !appointment.isActive) {
+    if (!appointment) {
       return res.status(404).json({
         success: false,
         message: "Appointment not found",
       });
     }
 
-    // Permission check
     if (
       req.user.role !== "super_admin" &&
+      req.user.role !== "saas_admin" &&
       appointment.createdBy.toString() !== req.user._id.toString()
     ) {
       return res.status(403).json({
         success: false,
-        message: "Only the creator can remove attendees",
+        message: "You don't have permission to remove attendees",
       });
     }
 
-    const decodedAttendee = decodeURIComponent(attendee).toLowerCase();
+    const decodedAttendee = decodeURIComponent(req.params.attendee).toLowerCase();
 
     const originalLength = appointment.attendees.length;
 
     appointment.attendees = appointment.attendees.filter(
-      (a) => a.toLowerCase() !== decodedAttendee,
+      (a) => a.toLowerCase() !== decodedAttendee
     );
 
-    // If attendee not found
     if (appointment.attendees.length === originalLength) {
       return res.status(404).json({
         success: false,
@@ -778,18 +771,14 @@ export const removeAttendee = async (req, res) => {
 
     await appointment.save();
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       message: "Attendee removed successfully",
-      data: {
-        attendees: appointment.attendees,
-      },
+      data: { attendees: appointment.attendees },
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    console.error("🔥 removeAttendee error:", error);
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
