@@ -66,13 +66,13 @@
 
 /**
  * @swagger
- * /api/attributes/createAttribute:
+ * /api/attribute/createAttribute:
  *   post:
  *     tags: [Attributes]
  *     summary: Create a new attribute
  *     description: |
- *       - **saas_admin**: Can create attributes for the system  
- *       - **super_admin**: Creates attributes owned by them
+ *       - **saas_admin**: Can create attribute for the system  
+ *       - **super_admin**: Creates attribute owned by them
  *     security:
  *       - bearerAuth: []
  *     requestBody:
@@ -94,18 +94,18 @@
 
 /**
  * @swagger
- * /api/attributes/getAllAttributes:
+ * /api/attribute/getAllAttributes:
  *   get:
  *     tags: [Attributes]
- *     summary: Get all attributes
+ *     summary: Get all attribute
  *     description: |
- *       - **saas_admin**: Gets all attributes  
- *       - **super_admin**: Gets only attributes created by them
+ *       - **saas_admin**: Gets all attribute  
+ *       - **super_admin**: Gets only attribute created by them
  *     security:
  *       - bearerAuth: []
  *     responses:
  *       200:
- *         description: List of attributes
+ *         description: List of attribute
  *         content:
  *           application/json:
  *             schema:
@@ -120,7 +120,7 @@
 
 /**
  * @swagger
- * /api/attributes/getAttributeById/{id}:
+ * /api/attribute/getAttributeById/{id}:
  *   get:
  *     tags: [Attributes]
  *     summary: Get attribute by ID
@@ -149,13 +149,13 @@
 
 /**
  * @swagger
- * /api/attributes/updateAttribute/{id}:
+ * /api/attribute/updateAttribute/{id}:
  *   put:
  *     tags: [Attributes]
  *     summary: Update attribute by ID
  *     description: |
  *       - **saas_admin**: Can update any attribute  
- *       - **super_admin**: Can update only their own attributes
+ *       - **super_admin**: Can update only their own attribute
  *     security:
  *       - bearerAuth: []
  *     parameters:
@@ -181,13 +181,13 @@
 
 /**
  * @swagger
- * /api/attributes/deleteAttribute/{id}:
+ * /api/attribute/deleteAttribute/{id}:
  *   delete:
  *     tags: [Attributes]
  *     summary: Delete attribute by ID
  *     description: |
  *       - **saas_admin**: Can delete any attribute  
- *       - **super_admin**: Can delete only their own attributes
+ *       - **super_admin**: Can delete only their own attribute
  *     security:
  *       - bearerAuth: []
  *     parameters:

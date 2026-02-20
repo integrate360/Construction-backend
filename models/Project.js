@@ -46,7 +46,7 @@ const ProjectSchema = new Schema(
     /* ---------- Client ---------- */
     client: {
       type: Schema.Types.ObjectId,
-      ref: "Client",
+      ref: "User",
       required: true,
       index: true,
     },
@@ -65,15 +65,8 @@ const ProjectSchema = new Schema(
       latitude: Number,
       longitude: Number,
       landAreaSqFt: { type: Number, min: 0 },
-      builtUpAreaSqFt: { type: Number, min: 0 },
-      soilType: String,
-      siteAccess: {
-        type: String,
-        enum: ["easy", "moderate", "difficult"],
-      },
+      builtUpAreaSqFt: { type: Number, min: 0 }
     },
-
-    /* ---------- Project Details ---------- */
     area: String,
     type: {
       type: String,
@@ -130,7 +123,7 @@ const ProjectSchema = new Schema(
     },
     paymentMode: {
       type: String,
-      enum: ["cash", "bank", "loan"],
+      enum: ["cash", "bank"],
     },
 
     /* ---------- Timeline ---------- */
