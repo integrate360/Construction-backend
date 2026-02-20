@@ -221,6 +221,7 @@ export const getProjectById = async (req, res) => {
     const project = await Project.findById(req.params.id)
       .populate("client", "name email phoneNumber")
       .populate("projectManager", "name email phoneNumber")
+      .populate("labour", "name email phoneNumber")
       .populate("createdBy", "name email")
       .populate("AttributeSet"); // Populate AttributeSet
 
@@ -252,6 +253,7 @@ export const getProjectById = async (req, res) => {
 
 export const updateProject = async (req, res) => {
   try {
+    // ❌ Client & Labour cannot update projects
     if (req.user.role === "client" || req.user.role === "labour") {
       return res.status(403).json({
         success: false,
@@ -267,7 +269,7 @@ export const updateProject = async (req, res) => {
       });
     }
 
-    // 🔐 Access check
+    // 🔐 Access control
     if (!canAccessProject(req.user, project)) {
       return res.status(403).json({
         success: false,
@@ -276,10 +278,10 @@ export const updateProject = async (req, res) => {
     }
 
     /* ===============================
-       VALIDATIONS (ADMIN ONLY)
+       ADMIN-ONLY VALIDATIONS
     =============================== */
 
-    // ✅ Validate client assignment
+    // ✅ Client validation
     if (req.body.client !== undefined) {
       if (!isAdmin(req.user.role)) {
         return res.status(403).json({
@@ -289,24 +291,17 @@ export const updateProject = async (req, res) => {
       }
 
       if (req.body.client) {
-        const clientExists = await User.findById(req.body.client);
-        if (!clientExists) {
-          return res.status(404).json({
-            success: false,
-            message: "Client not found",
-          });
-        }
-
-        if (clientExists.role !== "client") {
+        const client = await User.findById(req.body.client);
+        if (!client || client.role !== "client") {
           return res.status(400).json({
             success: false,
-            message: "Assigned user must have the 'client' role",
+            message: "Assigned user must be a valid client",
           });
         }
       }
     }
 
-    // ✅ Validate project manager assignment
+    // ✅ Project Manager validation
     if (req.body.projectManager !== undefined) {
       if (!isAdmin(req.user.role)) {
         return res.status(403).json({
@@ -316,35 +311,54 @@ export const updateProject = async (req, res) => {
       }
 
       if (req.body.projectManager) {
-        const pmExists = await User.findById(req.body.projectManager);
-        if (!pmExists) {
-          return res.status(404).json({
-            success: false,
-            message: "Project Manager not found",
-          });
-        }
-
-        if (pmExists.role !== "site_manager") {
+        const pm = await User.findById(req.body.projectManager);
+        if (!pm || pm.role !== "site_manager") {
           return res.status(400).json({
             success: false,
             message:
-              "Assigned project manager must have the 'site_manager' role",
+              "Assigned project manager must have role 'site_manager'",
           });
         }
       }
     }
 
-    // ✅ Validate AttributeSet (array safe)
+    // ✅ Labour validation (🔥 FIXED PART)
+    if (req.body.labour !== undefined) {
+      if (!isAdmin(req.user.role)) {
+        return res.status(403).json({
+          success: false,
+          message: "Only admins can assign labour",
+        });
+      }
+
+      const labourIds = Array.isArray(req.body.labour)
+        ? req.body.labour
+        : [req.body.labour];
+
+      const labourUsers = await User.find({
+        _id: { $in: labourIds },
+        role: "labour",
+      });
+
+      if (labourUsers.length !== labourIds.length) {
+        return res.status(400).json({
+          success: false,
+          message: "One or more users are not valid labour",
+        });
+      }
+    }
+
+    // ✅ AttributeSet validation
     if (req.body.AttributeSet) {
-      const attributeSetIds = Array.isArray(req.body.AttributeSet)
+      const ids = Array.isArray(req.body.AttributeSet)
         ? req.body.AttributeSet
         : [req.body.AttributeSet];
 
       const count = await AttributeSet.countDocuments({
-        _id: { $in: attributeSetIds },
+        _id: { $in: ids },
       });
 
-      if (count !== attributeSetIds.length) {
+      if (count !== ids.length) {
         return res.status(404).json({
           success: false,
           message: "One or more AttributeSets not found",
@@ -386,34 +400,31 @@ export const updateProject = async (req, res) => {
     });
 
     /* ===============================
-       AUTO PROGRESS CALCULATION
+       AUTO PROGRESS
     =============================== */
 
     if (req.body.phases) {
-      const totalPhases = project.phases.length;
-      if (totalPhases > 0) {
-        const completed = project.phases.filter(
-          (p) => p.isCompleted,
-        ).length;
+      const total = project.phases.length;
+      const completed = project.phases.filter(p => p.isCompleted).length;
 
-        project.progressPercentage = (completed / totalPhases) * 100;
+      project.progressPercentage =
+        total > 0 ? (completed / total) * 100 : 0;
 
-        project.projectStatus =
-          project.progressPercentage === 0
-            ? "not_started"
-            : project.progressPercentage === 100
+      project.projectStatus =
+        project.progressPercentage === 0
+          ? "not_started"
+          : project.progressPercentage === 100
             ? "completed"
             : "running";
-      }
     }
 
-    const updatedProject = await project.save();
+    await project.save();
 
     /* ===============================
        RESPONSE
     =============================== */
 
-    const populatedProject = await Project.findById(updatedProject._id)
+    const populatedProject = await Project.findById(project._id)
       .populate("client", "name email phoneNumber")
       .populate("projectManager", "name email phoneNumber")
       .populate("labour", "name email phoneNumber")
