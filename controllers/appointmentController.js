@@ -512,7 +512,7 @@ export const deleteAppointment = async (req, res) => {
 
     console.log("👉 Appointment from DB:", appointment);
 
-    // 1. Appointment existence check (NO isActive condition)
+    // 1. Appointment existence check
     if (!appointment) {
       return res.status(404).json({
         success: false,
@@ -532,18 +532,14 @@ export const deleteAppointment = async (req, res) => {
       });
     }
 
-    // 3. Soft delete (idempotent)
-    if (appointment.isActive === false) {
-      console.log("ℹ️ Appointment already inactive");
-    } else {
-      appointment.isActive = false;
-      await appointment.save();
-      console.log("✅ Appointment soft deleted");
-    }
+    // 3. HARD DELETE
+    await Appointment.findByIdAndDelete(req.params.id);
+
+    console.log("🗑️ Appointment permanently deleted");
 
     return res.status(200).json({
       success: true,
-      message: "Appointment deleted successfully",
+      message: "Appointment deleted permanently",
     });
   } catch (error) {
     console.error("🔥 Error in deleteAppointment:", error);
@@ -554,7 +550,6 @@ export const deleteAppointment = async (req, res) => {
     });
   }
 };
-
 export const getUpcomingAppointments = async (req, res) => {
   try {
     const { days = 7, limit = 10 } = req.query;
