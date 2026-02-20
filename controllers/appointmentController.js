@@ -171,33 +171,54 @@ export const getAppointments = async (req, res) => {
 
 export const getAppointmentById = async (req, res) => {
   try {
+    console.log("👉 Appointment ID:", req.params.id);
+    console.log("👉 Logged in User:", {
+      id: req.user?._id,
+      role: req.user?.role,
+    });
+
     const appointment = await Appointment.findById(req.params.id)
       .populate("project", "name description color members")
       .populate("createdBy", "name email profilePic role");
 
-    if (!appointment || !appointment.isActive) {
+    console.log("👉 Appointment from DB:", appointment);
+
+    // 1. Appointment existence check
+    if (!appointment) {
+      console.log("❌ Appointment not found");
       return res.status(404).json({
         success: false,
         message: "Appointment not found",
       });
     }
+
+    // 2. Permission check (NO isActive condition)
     if (
-      req.user.role !== "saas_admin" &&
       req.user.role !== "super_admin" &&
+      req.user.role !== "saas_admin" &&
       appointment.createdBy._id.toString() !== req.user._id.toString()
     ) {
+      console.log("❌ Permission denied", {
+        appointmentCreatedBy: appointment.createdBy._id.toString(),
+        currentUser: req.user._id.toString(),
+      });
+
       return res.status(403).json({
         success: false,
         message: "You don't have permission to view this appointment",
       });
     }
 
-    res.status(200).json({
+    console.log("✅ Appointment fetched (active or inactive)");
+
+    return res.status(200).json({
       success: true,
       data: appointment,
     });
   } catch (error) {
-    res.status(500).json({
+    console.error("🔥 Error in getAppointmentById:", error);
+
+    return res.status(500).json({
       success: false,
       message: error.message,
     });
@@ -481,36 +502,53 @@ export const completeAppointment = async (req, res) => {
 
 export const deleteAppointment = async (req, res) => {
   try {
+    console.log("👉 Delete Appointment ID:", req.params.id);
+    console.log("👉 Logged in User:", {
+      id: req.user?._id,
+      role: req.user?.role,
+    });
+
     const appointment = await Appointment.findById(req.params.id);
 
-    if (!appointment || !appointment.isActive) {
+    console.log("👉 Appointment from DB:", appointment);
+
+    // 1. Appointment existence check (NO isActive condition)
+    if (!appointment) {
       return res.status(404).json({
         success: false,
         message: "Appointment not found",
       });
     }
 
-    // Check permission
+    // 2. Permission check
     if (
       req.user.role !== "super_admin" &&
+      req.user.role !== "saas_admin" &&
       appointment.createdBy.toString() !== req.user._id.toString()
     ) {
       return res.status(403).json({
         success: false,
-        message: "Only the creator can delete this appointment",
+        message: "You don't have permission to delete this appointment",
       });
     }
 
-    // Soft delete
-    appointment.isActive = false;
-    await appointment.save();
+    // 3. Soft delete (idempotent)
+    if (appointment.isActive === false) {
+      console.log("ℹ️ Appointment already inactive");
+    } else {
+      appointment.isActive = false;
+      await appointment.save();
+      console.log("✅ Appointment soft deleted");
+    }
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       message: "Appointment deleted successfully",
     });
   } catch (error) {
-    res.status(500).json({
+    console.error("🔥 Error in deleteAppointment:", error);
+
+    return res.status(500).json({
       success: false,
       message: error.message,
     });
@@ -944,3 +982,4 @@ export const checkAvailability = async (req, res) => {
     });
   }
 };
+
