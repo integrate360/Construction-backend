@@ -8,6 +8,7 @@ import authRoutes from "./routes/authRoutes.js";
 import attributeRoutes from "./routes/attributeRoutes.js";
 import attributeSetRoutes from "./routes/attributeSetRoutes.js";
 import appointmentRoutes from "./routes/appointmentRoutes.js";
+import projectRoutes from "./routes/projectRoutes.js";
 
 dotenv.config({ quiet: true });
 
@@ -37,7 +38,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/attribute", attributeRoutes);
 app.use("/api/attribute-sets", attributeSetRoutes);
 app.use("/api/appointments", appointmentRoutes);
-
+app.use("/api/projects", projectRoutes);
 
 // 404 Handler
 app.use((req, res) => {
