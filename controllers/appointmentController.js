@@ -227,6 +227,13 @@ export const getAppointmentById = async (req, res) => {
 
 export const updateAppointment = async (req, res) => {
   try {
+    console.log("👉 Update Appointment ID:", req.params.id);
+    console.log("👉 Logged in User:", {
+      id: req.user?._id,
+      role: req.user?.role,
+    });
+    console.log("👉 Update Payload:", req.body);
+
     const {
       title,
       description,
@@ -241,25 +248,29 @@ export const updateAppointment = async (req, res) => {
 
     let appointment = await Appointment.findById(req.params.id);
 
-    if (!appointment || !appointment.isActive) {
+    console.log("👉 Appointment from DB:", appointment);
+
+    // 1. Appointment existence check (NO isActive condition)
+    if (!appointment) {
       return res.status(404).json({
         success: false,
         message: "Appointment not found",
       });
     }
 
-    // Permission check
+    // 2. Permission check (super_admin, saas_admin, creator)
     if (
       req.user.role !== "super_admin" &&
+      req.user.role !== "saas_admin" &&
       appointment.createdBy.toString() !== req.user._id.toString()
     ) {
       return res.status(403).json({
         success: false,
-        message: "Only the creator can update this appointment",
+        message: "You don't have permission to update this appointment",
       });
     }
 
-    // Time validation
+    // 3. Time validation
     const newStartTime = startTime
       ? new Date(startTime)
       : appointment.startTime;
@@ -294,20 +305,24 @@ export const updateAppointment = async (req, res) => {
       req.params.id,
       updateData,
       {
-        returnDocument: "after",
+        new: true, // cleaner than returnDocument
         runValidators: true,
-      },
+      }
     )
       .populate("project", "name description color")
       .populate("createdBy", "name email profilePic");
 
-    res.status(200).json({
+    console.log("✅ Appointment updated successfully");
+
+    return res.status(200).json({
       success: true,
       data: appointment,
       message: "Appointment updated successfully",
     });
   } catch (error) {
-    res.status(500).json({
+    console.error("🔥 Error in updateAppointment:", error);
+
+    return res.status(500).json({
       success: false,
       message: error.message,
     });
