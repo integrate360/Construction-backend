@@ -1,6 +1,6 @@
 import Project from "../models/Project.js";
 
-const calculateBudgetBreakdown = (attributeSets) => {
+const calculateextracostBreakdown = (attributeSets) => {
   if (!attributeSets || !Array.isArray(attributeSets) || attributeSets.length === 0) {
     return {
       totalAttributesValue: 0,
@@ -114,28 +114,28 @@ const calculateBudgetBreakdown = (attributeSets) => {
   };
 };
 
-const calculatePhaseBudgetAllocation = (phases, totalBudget) => {
-  if (!phases || phases.length === 0 || !totalBudget) return [];
+const calculatePhaseextracostAllocation = (phases, totalextracost) => {
+  if (!phases || phases.length === 0 || !totalextracost) return [];
 
   // Define phase weightage (customize these percentages as needed)
   const phaseWeightage = {
-    FOUNDATION: 0.2, // 20% of total budget
-    STRUCTURE: 0.4,  // 40% of total budget
-    FINISHING: 0.3,  // 30% of total budget
-    HANDOVER: 0.1,   // 10% of total budget
+    FOUNDATION: 0.2, // 20% of total extracost
+    STRUCTURE: 0.4,  // 40% of total extracost
+    FINISHING: 0.3,  // 30% of total extracost
+    HANDOVER: 0.1,   // 10% of total extracost
   };
 
   return phases.map((phase) => {
-    const allocatedBudget = totalBudget * (phaseWeightage[phase.phaseName] || 0);
-    const spentBudget = allocatedBudget * (phase.completionPercentage / 100);
+    const allocatedextracost = totalextracost * (phaseWeightage[phase.phaseName] || 0);
+    const spentextracost = allocatedextracost * (phase.completionPercentage / 100);
 
     return {
       phaseName: phase.phaseName,
       completionPercentage: phase.completionPercentage,
       isCompleted: phase.isCompleted,
-      allocatedBudget: Math.round(allocatedBudget),
-      spentBudget: Math.round(spentBudget),
-      remainingBudget: Math.round(allocatedBudget - spentBudget),
+      allocatedextracost: Math.round(allocatedextracost),
+      spentextracost: Math.round(spentextracost),
+      remainingextracost: Math.round(allocatedextracost - spentextracost),
       weightage: ((phaseWeightage[phase.phaseName] || 0) * 100).toFixed(0) + '%',
     };
   });
@@ -250,25 +250,25 @@ const calculateTotalProjectCost = (project) => {
   };
 };
 
-const calculateBudgetUtilization = (budget, totalCost) => {
-  const projectBudget = budget || 0;
-  const allocatedPercentage = projectBudget > 0 
-    ? ((totalCost / projectBudget) * 100).toFixed(2) 
+const calculateextracostUtilization = (extracost, totalCost) => {
+  const projectextracost = extracost || 0;
+  const allocatedPercentage = projectextracost > 0 
+    ? ((totalCost / projectextracost) * 100).toFixed(2) 
     : '0.00';
     
   return {
-    totalBudget: projectBudget,
+    totalextracost: projectextracost,
     totalCalculatedCost: totalCost,
-    difference: projectBudget - totalCost,
-    isOverBudget: totalCost > projectBudget,
+    difference: projectextracost - totalCost,
+    isOverextracost: totalCost > projectextracost,
     allocatedPercentage: allocatedPercentage + '%',
-    status: totalCost > projectBudget ? 'OVER_BUDGET' : 
-            totalCost === projectBudget ? 'FULLY_ALLOCATED' : 'WITHIN_BUDGET',
-    budgetConsumptionRatio: (totalCost / projectBudget).toFixed(2)
+    status: totalCost > projectextracost ? 'OVER_extracost' : 
+            totalCost === projectextracost ? 'FULLY_ALLOCATED' : 'WITHIN_extracost',
+    extracostConsumptionRatio: (totalCost / projectextracost).toFixed(2)
   };
 };
-// Optional: Get only budget breakdown
- const getProjectBudgetBreakdown = async (req, res) => {
+// Optional: Get only extracost breakdown
+ const getProjectextracostBreakdown = async (req, res) => {
   try {
     const project = await Project.findById(req.params.id)
       .populate({
@@ -279,7 +279,7 @@ const calculateBudgetUtilization = (budget, totalCost) => {
           select: "label type pricing"
         }
       })
-      .select("budget AttributeSet phases projectName");
+      .select("extracost AttributeSet phases projectName");
 
     if (!project) {
       return res.status(404).json({
@@ -295,37 +295,37 @@ const calculateBudgetUtilization = (budget, totalCost) => {
       });
     }
 
-    const budgetBreakdown = calculateBudgetBreakdown(project.AttributeSet);
-    const totalBudget = project.budget || 0;
-    const phaseAllocation = calculatePhaseBudgetAllocation(project.phases, totalBudget);
+    const extracostBreakdown = calculateextracostBreakdown(project.AttributeSet);
+    const totalextracost = project.extracost || 0;
+    const phaseAllocation = calculatePhaseextracostAllocation(project.phases, totalextracost);
 
     res.json({
       success: true,
       data: {
         projectId: project._id,
         projectName: project.projectName,
-        totalBudget,
-        budgetBreakdown: {
-          ...budgetBreakdown,
-          budgetUtilization: {
-            totalBudget,
-            allocatedValue: budgetBreakdown.totalAttributesValue,
-            remainingBudget: totalBudget - budgetBreakdown.totalAttributesValue,
-            allocatedPercentage: totalBudget > 0 
-              ? ((budgetBreakdown.totalAttributesValue / totalBudget) * 100).toFixed(2) + '%' 
+        totalextracost,
+        extracostBreakdown: {
+          ...extracostBreakdown,
+          extracostUtilization: {
+            totalextracost,
+            allocatedValue: extracostBreakdown.totalAttributesValue,
+            remainingextracost: totalextracost - extracostBreakdown.totalAttributesValue,
+            allocatedPercentage: totalextracost > 0 
+              ? ((extracostBreakdown.totalAttributesValue / totalextracost) * 100).toFixed(2) + '%' 
               : '0%',
-            status: budgetBreakdown.totalAttributesValue > totalBudget 
-              ? 'OVER_BUDGET' 
-              : budgetBreakdown.totalAttributesValue === totalBudget 
+            status: extracostBreakdown.totalAttributesValue > totalextracost 
+              ? 'OVER_extracost' 
+              : extracostBreakdown.totalAttributesValue === totalextracost 
                 ? 'FULLY_ALLOCATED' 
-                : 'WITHIN_BUDGET'
+                : 'WITHIN_extracost'
           }
         },
-        phaseBudgetAllocation: phaseAllocation
+        phaseextracostAllocation: phaseAllocation
       }
     });
   } catch (error) {
-    console.error("Get Budget Breakdown Error:", error);
+    console.error("Get extracost Breakdown Error:", error);
     res.status(500).json({
       success: false,
       message: error.message,
@@ -333,4 +333,4 @@ const calculateBudgetUtilization = (budget, totalCost) => {
   }
 };
 
-export { getProjectBudgetBreakdown, calculateBudgetBreakdown, calculatePhaseBudgetAllocation, calculateTotalProjectCost, calculateBudgetUtilization };
+export { getProjectextracostBreakdown, calculateextracostBreakdown, calculatePhaseextracostAllocation, calculateTotalProjectCost, calculateextracostUtilization };

@@ -116,7 +116,7 @@ const projectSchema = new mongoose.Schema(
       },
     },
 
-    budget: {
+    extracost: {
       type: Number,
       required: true,
       min: 0,

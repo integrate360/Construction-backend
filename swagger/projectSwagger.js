@@ -109,7 +109,7 @@
  *           type: string
  *           format: date
  *           example: "2024-12-31"
- *         budget:
+ *         extracost:
  *           type: number
  *           example: 5000000
  *         progressPercentage:
@@ -152,7 +152,7 @@
  *         totalProjects:
  *           type: number
  *           example: 25
- *         totalBudget:
+ *         totalextracost:
  *           type: number
  *           example: 125000000
  *         averageProgress:
@@ -211,7 +211,7 @@
  *               - projectName
  *               - siteName
  *               - startDate
- *               - budget
+ *               - extracost
  *               - AttributeSet
  *             properties:
  *               projectName:
@@ -248,7 +248,7 @@
  *                 type: string
  *                 format: date
  *                 example: "2024-12-31"
- *               budget:
+ *               extracost:
  *                 type: number
  *                 example: 5000000
  *               phases:
@@ -360,7 +360,7 @@
  *         schema:
  *           type: string
  *           default: createdAt
- *           enum: [createdAt, projectName, budget, startDate, progressPercentage]
+ *           enum: [createdAt, projectName, extracost, startDate, progressPercentage]
  *         description: Field to sort by
  *       - in: query
  *         name: sortOrder
@@ -521,7 +521,7 @@
  *                 type: string
  *                 format: date
  *                 example: "2025-01-31"
- *               budget:
+ *               extracost:
  *                 type: number
  *                 example: 5500000
  *               progressPercentage:

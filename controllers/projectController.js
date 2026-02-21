@@ -8,7 +8,7 @@ import {
   canAccessProject,
   buildRoleFilter,
 } from "../helpers/roleHelper.js";
-import {calculateBudgetBreakdown, calculatePhaseBudgetAllocation} from "../helpers/costfunction.js";
+import {calculateextracostBreakdown, calculatePhaseextracostAllocation} from "../helpers/costfunction.js";
 
 export const createProject = async (req, res) => {
   try {
@@ -31,7 +31,7 @@ export const createProject = async (req, res) => {
       AttributeSet: attributeSetIds,
       startDate,
       expectedEndDate,
-      budget,
+      extracost,
       phases,
       documents,
     } = req.body;
@@ -41,13 +41,13 @@ export const createProject = async (req, res) => {
       !projectName ||
       !siteName ||
       !startDate ||
-      !budget ||
+      !extracost ||
       !attributeSetIds
     ) {
       return res.status(400).json({
         success: false,
         message:
-          "Missing required fields: projectName, siteName, startDate, budget, and AttributeSet are required",
+          "Missing required fields: projectName, siteName, startDate, extracost, and AttributeSet are required",
       });
     }
 
@@ -163,7 +163,7 @@ export const createProject = async (req, res) => {
       AttributeSet: attributeSetArray,
       startDate,
       expectedEndDate,
-      budget,
+      extracost,
       phases: phases || [],
       documents: documents || [],
       progressPercentage,
@@ -191,7 +191,7 @@ export const createProject = async (req, res) => {
   }
 };
 
-// Enhanced getProjects with budget breakdown
+// Enhanced getProjects with extracost breakdown
 export const getProjects = async (req, res) => {
   try {
     const {
@@ -205,7 +205,7 @@ export const getProjects = async (req, res) => {
       search,
       sortBy = "createdAt",
       sortOrder = "desc",
-      includeBudgetBreakdown = "false",
+      includeextracostBreakdown = "false",
     } = req.query;
 
     // Base filter from role
@@ -634,22 +634,22 @@ export const getProjects = async (req, res) => {
     // Get total count for pagination
     const total = await Project.countDocuments(filter);
 
-    // Transform projects to include budget breakdown if requested
+    // Transform projects to include extracost breakdown if requested
     let transformedProjects = projects;
     
-    if (includeBudgetBreakdown === "true") {
+    if (includeextracostBreakdown === "true") {
       transformedProjects = projects.map(project => {
-        // Calculate budget breakdown using the aggregated data
-        const totalBudget = project.budget || 0;
+        // Calculate extracost breakdown using the aggregated data
+        const totalextracost = project.extracost || 0;
         const allocatedValue = project.projectTotal || 0;
         
-        // Calculate phase budget allocation (optional for list view)
-        const phaseBudgetAllocation = project.phases 
-          ? calculatePhaseBudgetAllocation(project.phases, totalBudget)
+        // Calculate phase extracost allocation (optional for list view)
+        const phaseextracostAllocation = project.phases 
+          ? calculatePhaseextracostAllocation(project.phases, totalextracost)
           : null;
 
-        // Create budget breakdown
-        const budgetBreakdown = {
+        // Create extracost breakdown
+        const extracostBreakdown = {
           totalAttributesValue: allocatedValue,
           attributeSets: project.attributeSets.map(set => ({
             _id: set._id,
@@ -676,28 +676,28 @@ export const getProjects = async (req, res) => {
               ? (allocatedValue / project.totalValidAttributes).toFixed(2) 
               : "0.00"
           },
-          budgetUtilization: {
-            totalBudget,
+          extracostUtilization: {
+            totalextracost,
             allocatedValue,
-            remainingBudget: totalBudget - allocatedValue,
-            allocatedPercentage: totalBudget > 0 
-              ? ((allocatedValue / totalBudget) * 100).toFixed(2) + '%' 
+            remainingextracost: totalextracost - allocatedValue,
+            allocatedPercentage: totalextracost > 0 
+              ? ((allocatedValue / totalextracost) * 100).toFixed(2) + '%' 
               : '0%',
-            status: allocatedValue > totalBudget 
-              ? 'OVER_BUDGET' 
-              : allocatedValue === totalBudget 
+            status: allocatedValue > totalextracost 
+              ? 'OVER_extracost' 
+              : allocatedValue === totalextracost 
                 ? 'FULLY_ALLOCATED' 
-                : 'WITHIN_BUDGET',
-            utilizationRatio: totalBudget > 0 
-              ? (allocatedValue / totalBudget).toFixed(2) 
+                : 'WITHIN_extracost',
+            utilizationRatio: totalextracost > 0 
+              ? (allocatedValue / totalextracost).toFixed(2) 
               : '0.00'
           }
         };
 
         return {
           ...project,
-          budgetBreakdown,
-          phaseBudgetAllocation
+          extracostBreakdown,
+          phaseextracostAllocation
         };
       });
     }
@@ -1043,20 +1043,20 @@ export const getProjectById = async (req, res) => {
       });
     }
 
-    // Calculate budget breakdown using the aggregated data
-    const budgetBreakdown = calculateBudgetBreakdown(project.attributeSets);
+    // Calculate extracost breakdown using the aggregated data
+    const extracostBreakdown = calculateextracostBreakdown(project.attributeSets);
     
-    // Calculate budget utilization
-    const totalBudget = project.budget || 0;
+    // Calculate extracost utilization
+    const totalextracost = project.extracost || 0;
     const allocatedValue = project.projectTotal || 0;
 
-    // Calculate phase budget allocation
-    const phaseBudgetAllocation = calculatePhaseBudgetAllocation(project.phases, totalBudget);
+    // Calculate phase extracost allocation
+    const phaseextracostAllocation = calculatePhaseextracostAllocation(project.phases, totalextracost);
 
     // Add calculated fields to response
     const enhancedProject = {
       ...project,
-      budgetBreakdown: {
+      extracostBreakdown: {
         totalAttributesValue: allocatedValue,
         attributeSets: (project.attributeSets || []).map(set => ({
           _id: set._id,
@@ -1084,17 +1084,17 @@ export const getProjectById = async (req, res) => {
             ? (allocatedValue / (project.attributeSets || []).reduce((acc, set) => acc + (set.attributeCount || 0), 0)).toFixed(2) 
             : "0.00"
         },
-        budgetUtilization: {
-          totalBudget,
+        extracostUtilization: {
+          totalextracost,
           allocatedValue,
-          remainingBudget: totalBudget - allocatedValue,
-          allocatedPercentage: totalBudget > 0 ? ((allocatedValue / totalBudget) * 100).toFixed(2) + '%' : '0%',
-          status: allocatedValue > totalBudget ? 'OVER_BUDGET' : 
-                  allocatedValue === totalBudget ? 'FULLY_ALLOCATED' : 'WITHIN_BUDGET',
-          utilizationRatio: totalBudget > 0 ? (allocatedValue / totalBudget).toFixed(2) : '0.00'
+          remainingextracost: totalextracost - allocatedValue,
+          allocatedPercentage: totalextracost > 0 ? ((allocatedValue / totalextracost) * 100).toFixed(2) + '%' : '0%',
+          status: allocatedValue > totalextracost ? 'OVER_extracost' : 
+                  allocatedValue === totalextracost ? 'FULLY_ALLOCATED' : 'WITHIN_extracost',
+          utilizationRatio: totalextracost > 0 ? (allocatedValue / totalextracost).toFixed(2) : '0.00'
         }
       },
-      phaseBudgetAllocation
+      phaseextracostAllocation
     };
 
     res.json({
@@ -1352,7 +1352,7 @@ export const updateProject = async (req, res) => {
       "siteName",
       "startDate",
       "expectedEndDate",
-      "budget",
+      "extracost",
       "projectStatus",
       "approvalStatus",
     ];
@@ -1370,11 +1370,11 @@ export const updateProject = async (req, res) => {
           }
         }
         
-        // Validation for budget
-        if (field === "budget" && req.body.budget < 0) {
+        // Validation for extracost
+        if (field === "extracost" && req.body.extracost < 0) {
           return res.status(400).json({
             success: false,
-            message: "Budget cannot be negative",
+            message: "extracost cannot be negative",
           });
         }
 
@@ -1499,7 +1499,7 @@ export const getProjectStats = async (req, res) => {
         $group: {
           _id: null,
           totalProjects: { $sum: 1 },
-          totalBudget: { $sum: "$budget" },
+          totalextracost: { $sum: "$extracost" },
           averageProgress: { $avg: "$progressPercentage" },
           projectsByStatus: { $push: "$projectStatus" }, // Fixed: was siteStatus
           projectsByApproval: { $push: "$approvalStatus" },
@@ -1508,7 +1508,7 @@ export const getProjectStats = async (req, res) => {
       {
         $project: {
           totalProjects: 1,
-          totalBudget: 1,
+          totalextracost: 1,
           averageProgress: { $round: ["$averageProgress", 2] },
           projectStatusBreakdown: {
             // Fixed: was siteStatusBreakdown
@@ -1586,7 +1586,7 @@ export const getProjectStats = async (req, res) => {
       success: true,
       data: stats[0] || {
         totalProjects: 0,
-        totalBudget: 0,
+        totalextracost: 0,
         averageProgress: 0,
         projectStatusBreakdown: {
           // Fixed: was siteStatusBreakdown
