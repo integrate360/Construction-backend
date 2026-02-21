@@ -7,6 +7,7 @@ import {
   canAccessProject,
   buildRoleFilter,
 } from "../helpers/roleHelper.js";
+import { calculateBudgetBreakdown, calculatePhaseBudgetAllocation } from "../helpers/costfunction.js";
 
 export const createProject = async (req, res) => {
   try {
@@ -189,12 +190,13 @@ export const createProject = async (req, res) => {
   }
 };
 
+// Enhanced getProjects with budget breakdown
 export const getProjects = async (req, res) => {
   try {
     const {
       page = 1,
       limit = 10,
-      projectStatus, // Fixed: was siteStatus
+      projectStatus,
       approvalStatus,
       client,
       labour,
@@ -202,13 +204,14 @@ export const getProjects = async (req, res) => {
       search,
       sortBy = "createdAt",
       sortOrder = "desc",
+      includeBudgetBreakdown = "false", // New query param
     } = req.query;
 
     // Base filter from role
     const filter = buildRoleFilter(req.user);
 
     // Status filters apply to all roles
-    if (projectStatus) filter.projectStatus = projectStatus; // Fixed: was siteStatus
+    if (projectStatus) filter.projectStatus = projectStatus;
     if (approvalStatus) filter.approvalStatus = approvalStatus;
 
     // Only admins can additionally filter by client/site_manager from query
@@ -248,11 +251,38 @@ export const getProjects = async (req, res) => {
       .skip(skip)
       .limit(parseInt(limit));
 
+    // Transform projects to include budget breakdown if requested
+    let transformedProjects = projects;
+    if (includeBudgetBreakdown === "true") {
+      transformedProjects = projects.map(project => {
+        const projectObj = project.toObject();
+        const budgetBreakdown = calculateBudgetBreakdown(projectObj.AttributeSet);
+        
+        // Calculate budget utilization
+        const totalBudget = projectObj.budget || 0;
+        const allocatedValue = budgetBreakdown.totalAttributesValue;
+        
+        return {
+          ...projectObj,
+          budgetBreakdown: {
+            ...budgetBreakdown,
+            budgetUtilization: {
+              totalBudget,
+              allocatedValue,
+              remainingBudget: totalBudget - allocatedValue,
+              allocatedPercentage: totalBudget > 0 ? ((allocatedValue / totalBudget) * 100).toFixed(2) + '%' : '0%',
+              status: allocatedValue > totalBudget ? 'OVER_BUDGET' : 'WITHIN_BUDGET'
+            }
+          }
+        };
+      });
+    }
+
     const total = await Project.countDocuments(filter);
 
     res.json({
       success: true,
-      data: projects,
+      data: transformedProjects,
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
@@ -268,6 +298,7 @@ export const getProjects = async (req, res) => {
   }
 };
 
+// Enhanced getProjectById with budget breakdown
 export const getProjectById = async (req, res) => {
   try {
     const project = await Project.findById(req.params.id)
@@ -294,9 +325,34 @@ export const getProjectById = async (req, res) => {
       });
     }
 
+    // Transform project to include budget breakdown
+    const projectObj = project.toObject();
+    const budgetBreakdown = calculateBudgetBreakdown(projectObj.AttributeSet);
+    
+    // Calculate budget utilization
+    const totalBudget = projectObj.budget || 0;
+    const allocatedValue = budgetBreakdown.totalAttributesValue;
+
+    // Add budget breakdown to response
+    const enhancedProject = {
+      ...projectObj,
+      budgetBreakdown: {
+        ...budgetBreakdown,
+        budgetUtilization: {
+          totalBudget,
+          allocatedValue,
+          remainingBudget: totalBudget - allocatedValue,
+          allocatedPercentage: totalBudget > 0 ? ((allocatedValue / totalBudget) * 100).toFixed(2) + '%' : '0%',
+          status: allocatedValue > totalBudget ? 'OVER_BUDGET' : allocatedValue === totalBudget ? 'FULLY_ALLOCATED' : 'WITHIN_BUDGET'
+        }
+      },
+      // Add phase-based budget allocation if needed
+      phaseBudgetAllocation: projectObj.phases ? calculatePhaseBudgetAllocation(projectObj.phases, totalBudget) : null
+    };
+
     res.json({
       success: true,
-      data: project,
+      data: enhancedProject,
     });
   } catch (error) {
     res.status(500).json({
