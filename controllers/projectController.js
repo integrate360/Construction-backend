@@ -481,16 +481,54 @@ export const getProjects = async (req, res) => {
                       _id: "$$attr._id",
                       quantity: "$$attr.quantity",
                       attribute: {
-                        $getField: {
-                          field: { $toString: "$$attr.attributeId" },
-                          input: "$attributeMap"
-                        }
-                      },
-                      totalCost: {
-                        $multiply: [
-                          { $ifNull: [{ $getField: { field: { $toString: "$$attr.attributeId" }, input: "$attributeMap" } }, 0] },
-                          { $ifNull: ["$$attr.quantity", 1] }
+                        $ifNull: [
+                          { $getField: { field: { $toString: "$$attr.attributeId" }, input: "$attributeMap" } },
+                          null
                         ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      
+      // Calculate totals in a separate stage to avoid $multiply issues
+      {
+        $addFields: {
+          attributeSets: {
+            $map: {
+              input: "$attributeSets",
+              as: "set",
+              in: {
+                _id: "$$set._id",
+                name: "$$set.name",
+                attributes: {
+                  $map: {
+                    input: "$$set.attributes",
+                    as: "attr",
+                    in: {
+                      _id: "$$attr._id",
+                      quantity: "$$attr.quantity",
+                      attribute: "$$attr.attribute",
+                      totalCost: {
+                        $cond: {
+                          if: { 
+                            $and: [
+                              { $ne: ["$$attr.attribute", null] },
+                              { $isNumber: "$$attr.attribute.pricing" }
+                            ]
+                          },
+                          then: {
+                            $multiply: [
+                              "$$attr.attribute.pricing",
+                              { $ifNull: ["$$attr.quantity", 1] }
+                            ]
+                          },
+                          else: 0
+                        }
                       }
                     }
                   }
@@ -498,27 +536,38 @@ export const getProjects = async (req, res) => {
                 setTotal: {
                   $sum: {
                     $map: {
-                      input: { $ifNull: ["$$set.attributes", []] },
+                      input: "$$set.attributes",
                       as: "attr",
                       in: {
-                        $multiply: [
-                          { $ifNull: [{ $getField: { field: { $toString: "$$attr.attributeId" }, input: "$attributeMap" } }, 0] },
-                          { $ifNull: ["$$attr.quantity", 1] }
-                        ]
+                        $cond: {
+                          if: { 
+                            $and: [
+                              { $ne: ["$$attr.attribute", null] },
+                              { $isNumber: "$$attr.attribute.pricing" }
+                            ]
+                          },
+                          then: {
+                            $multiply: [
+                              "$$attr.attribute.pricing",
+                              { $ifNull: ["$$attr.quantity", 1] }
+                            ]
+                          },
+                          else: 0
+                        }
                       }
                     }
                   }
                 },
-                attributeCount: { $size: { $ifNull: ["$$set.attributes", []] } },
+                attributeCount: { $size: "$$set.attributes" },
                 validAttributes: {
                   $size: {
                     $filter: {
-                      input: { $ifNull: ["$$set.attributes", []] },
+                      input: "$$set.attributes",
                       as: "attr",
                       cond: { 
-                        $ne: [
-                          { $getField: { field: { $toString: "$$attr.attributeId" }, input: "$attributeMap" } },
-                          null
+                        $and: [
+                          { $ne: ["$$attr.attribute", null] },
+                          { $isNumber: "$$attr.attribute.pricing" }
                         ]
                       }
                     }
@@ -534,7 +583,13 @@ export const getProjects = async (req, res) => {
       {
         $addFields: {
           projectTotal: {
-            $sum: "$attributeSets.setTotal"
+            $sum: {
+              $map: {
+                input: "$attributeSets",
+                as: "set",
+                in: "$$set.setTotal"
+              }
+            }
           }
         }
       },
@@ -543,10 +598,22 @@ export const getProjects = async (req, res) => {
       {
         $addFields: {
           totalAttributes: {
-            $sum: "$attributeSets.attributeCount"
+            $sum: {
+              $map: {
+                input: "$attributeSets",
+                as: "set",
+                in: "$$set.attributeCount"
+              }
+            }
           },
           totalValidAttributes: {
-            $sum: "$attributeSets.validAttributes"
+            $sum: {
+              $map: {
+                input: "$attributeSets",
+                as: "set",
+                in: "$$set.validAttributes"
+              }
+            }
           }
         }
       },
@@ -590,12 +657,24 @@ export const getProjects = async (req, res) => {
             totalPricing: set.setTotal || 0,
             attributeCount: set.attributeCount || 0,
             validAttributes: set.validAttributes || 0,
-            invalidAttributes: (set.attributeCount || 0) - (set.validAttributes || 0)
+            invalidAttributes: (set.attributeCount || 0) - (set.validAttributes || 0),
+            attributes: set.attributes.map(attr => ({
+              _id: attr.attribute?._id,
+              label: attr.attribute?.label,
+              type: attr.attribute?.type,
+              pricing: attr.attribute?.pricing,
+              quantity: attr.quantity,
+              totalPrice: attr.totalCost || 0,
+              isValid: !!attr.attribute
+            }))
           })),
           summary: {
             totalItems: project.totalAttributes || 0,
             totalValidItems: project.totalValidAttributes || 0,
-            totalInvalidItems: (project.totalAttributes || 0) - (project.totalValidAttributes || 0)
+            totalInvalidItems: (project.totalAttributes || 0) - (project.totalValidAttributes || 0),
+            averagePricePerItem: project.totalValidAttributes > 0 
+              ? (allocatedValue / project.totalValidAttributes).toFixed(2) 
+              : "0.00"
           },
           budgetUtilization: {
             totalBudget,
@@ -618,7 +697,7 @@ export const getProjects = async (req, res) => {
         return {
           ...project,
           budgetBreakdown,
-          phaseBudgetAllocation // Include if needed
+          phaseBudgetAllocation
         };
       });
     }
