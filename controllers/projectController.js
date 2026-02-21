@@ -8,7 +8,6 @@ import {
   canAccessProject,
   buildRoleFilter,
 } from "../helpers/roleHelper.js";
-import {calculateextracostBreakdown, calculatePhaseextracostAllocation} from "../helpers/costfunction.js";
 
 export const createProject = async (req, res) => {
   try {
@@ -204,7 +203,7 @@ export const getProjects = async (req, res) => {
       search,
       sortBy = "createdAt",
       sortOrder = "desc",
-      includeBudgetBreakdown = "false", // Renamed from includeextracostBreakdown
+      includeBudgetBreakdown = "false", 
     } = req.query;
 
     // Base filter from role
@@ -385,8 +384,7 @@ export const getProjects = async (req, res) => {
                     as: "attr",
                     in: {
                       _id: "$$attr._id",
-                      attributeId: "$$attr.attribute",
-                      quantity: { $ifNull: ["$$attr.quantity", 1] }
+                      attributeId: "$$attr.attribute"
                     }
                   }
                 }
@@ -478,7 +476,6 @@ export const getProjects = async (req, res) => {
                     as: "attr",
                     in: {
                       _id: "$$attr._id",
-                      quantity: "$$attr.quantity",
                       attribute: {
                         $ifNull: [
                           { $getField: { field: { $toString: "$$attr.attributeId" }, input: "$attributeMap" } },
@@ -510,7 +507,6 @@ export const getProjects = async (req, res) => {
                     as: "attr",
                     in: {
                       _id: "$$attr._id",
-                      quantity: "$$attr.quantity",
                       attribute: "$$attr.attribute",
                       totalCost: {
                         $cond: {
@@ -520,12 +516,7 @@ export const getProjects = async (req, res) => {
                               { $isNumber: "$$attr.attribute.pricing" }
                             ]
                           },
-                          then: {
-                            $multiply: [
-                              "$$attr.attribute.pricing",
-                              { $ifNull: ["$$attr.quantity", 1] }
-                            ]
-                          },
+                          then: "$$attr.attribute.pricing",
                           else: 0
                         }
                       }
@@ -545,12 +536,7 @@ export const getProjects = async (req, res) => {
                               { $isNumber: "$$attr.attribute.pricing" }
                             ]
                           },
-                          then: {
-                            $multiply: [
-                              "$$attr.attribute.pricing",
-                              { $ifNull: ["$$attr.quantity", 1] }
-                            ]
-                          },
+                          then: "$$attr.attribute.pricing",
                           else: 0
                         }
                       }
@@ -915,8 +901,7 @@ export const getProjectById = async (req, res) => {
                           $mergeObjects: [
                             "$$attr",
                             {
-                              attributeId: "$$attr.attribute",
-                              quantity: { $ifNull: ["$$attr.quantity", 1] }
+                              attributeId: "$$attr.attribute"
                             }
                           ]
                         }
@@ -1011,7 +996,6 @@ export const getProjectById = async (req, res) => {
                     as: "attr",
                     in: {
                       _id: "$$attr._id",
-                      quantity: "$$attr.quantity",
                       attribute: {
                         $ifNull: [
                           { $getField: { field: { $toString: "$$attr.attributeId" }, input: "$attributeMap" } },
@@ -1043,12 +1027,7 @@ export const getProjectById = async (req, res) => {
                         $map: {
                           input: { $ifNull: ["$$set.attributes", []] },
                           as: "attr",
-                          in: {
-                            $multiply: [
-                              { $ifNull: ["$$attr.attribute.pricing", 0] },
-                              { $ifNull: ["$$attr.quantity", 1] }
-                            ]
-                          }
+                          in: { $ifNull: ["$$attr.attribute.pricing", 0] }
                         }
                       }
                     },
@@ -1186,8 +1165,7 @@ export const getProjectById = async (req, res) => {
             label: attr.attribute?.label || 'Unknown',
             type: attr.attribute?.type || 'unknown',
             unitPrice: attr.attribute?.pricing || 0,
-            quantity: attr.quantity || 1,
-            totalPrice: (attr.attribute?.pricing || 0) * (attr.quantity || 1),
+            totalPrice: attr.attribute?.pricing || 0,
             isValid: !!attr.attribute
           }));
 
@@ -1276,7 +1254,7 @@ export const getProjectById = async (req, res) => {
           (set.attributes || []).forEach(attr => {
             if (attr.attribute?.type) {
               const type = attr.attribute.type;
-              const amount = (attr.attribute.pricing || 0) * (attr.quantity || 1);
+              const amount = attr.attribute.pricing || 0;
               acc[type] = (acc[type] || 0) + amount;
             }
           });
@@ -1623,8 +1601,6 @@ export const updateProject = async (req, res) => {
     }
 
     await project.save();
-
-    // ✅ Populate response
     const populatedProject = await Project.findById(project._id)
       .populate("client", "name email phoneNumber")
       .populate("site_manager", "name email phoneNumber")
@@ -1793,18 +1769,13 @@ export const getProjectStats = async (req, res) => {
               $map: {
                 input: "$allAttributes",
                 as: "attr",
-                in: {
-                  $multiply: [
-                    { $ifNull: ["$$attr.quantity", 1] },
-                    { 
-                      $ifNull: [
-                        { $getField: { 
-                          field: { $toString: "$$attr.attribute" }, 
-                          input: "$attributePricingMap" 
-                        }},
-                        0
-                      ]
-                    }
+                in: { 
+                  $ifNull: [
+                    { $getField: { 
+                      field: { $toString: "$$attr.attribute" }, 
+                      input: "$attributePricingMap" 
+                    }},
+                    0
                   ]
                 }
               }
@@ -2120,8 +2091,6 @@ export const getProjectStats = async (req, res) => {
   }
 };
 
-
-// Add new endpoint to update phase completion
 export const updatePhaseCompletion = async (req, res) => {
   try {
     const { projectId, phaseIndex } = req.params;
