@@ -1702,27 +1702,249 @@ export const getProjectStats = async (req, res) => {
 
     const stats = await Project.aggregate([
       { $match: matchStage },
+      
+      // First, lookup and calculate attribute set totals
+      {
+        $lookup: {
+          from: "attributesets",
+          localField: "AttributeSet",
+          foreignField: "_id",
+          as: "attributeSets"
+        }
+      },
+      
+      // Process each project to get attribute totals
+      {
+        $addFields: {
+          // Flatten all attributes from all sets
+          allAttributes: {
+            $reduce: {
+              input: "$attributeSets",
+              initialValue: [],
+              in: {
+                $concatArrays: [
+                  "$$value",
+                  { $ifNull: ["$$this.attributes", []] }
+                ]
+              }
+            }
+          }
+        }
+      },
+      
+      // Get all attribute IDs
+      {
+        $addFields: {
+          attributeIds: {
+            $map: {
+              input: "$allAttributes",
+              as: "attr",
+              in: "$$attr.attribute"
+            }
+          }
+        }
+      },
+      
+      // Lookup attribute details
+      {
+        $lookup: {
+          from: "attributes",
+          let: { attrIds: "$attributeIds" },
+          pipeline: [
+            {
+              $match: {
+                $expr: { $in: ["$_id", "$$attrIds"] }
+              }
+            },
+            {
+              $project: {
+                _id: 1,
+                pricing: 1
+              }
+            }
+          ],
+          as: "attributeDetails"
+        }
+      },
+      
+      // Create attribute pricing map
+      {
+        $addFields: {
+          attributePricingMap: {
+            $arrayToObject: {
+              $map: {
+                input: "$attributeDetails",
+                as: "attr",
+                in: {
+                  k: { $toString: "$$attr._id" },
+                  v: "$$attr.pricing"
+                }
+              }
+            }
+          }
+        }
+      },
+      
+      // Calculate project total from attribute sets
+      {
+        $addFields: {
+          calculatedProjectTotal: {
+            $sum: {
+              $map: {
+                input: "$allAttributes",
+                as: "attr",
+                in: {
+                  $multiply: [
+                    { $ifNull: ["$$attr.quantity", 1] },
+                    { 
+                      $ifNull: [
+                        { $getField: { 
+                          field: { $toString: "$$attr.attribute" }, 
+                          input: "$attributePricingMap" 
+                        }},
+                        0
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      
+      // Calculate final total including extracost
+      {
+        $addFields: {
+          finalProjectTotal: {
+            $add: [
+              { $ifNull: ["$calculatedProjectTotal", 0] },
+              { $ifNull: ["$extracost", 0] }
+            ]
+          },
+          // Budget variance
+          budgetVariance: {
+            $subtract: [
+              { $ifNull: ["$budget", 0] },
+              { 
+                $add: [
+                  { $ifNull: ["$calculatedProjectTotal", 0] },
+                  { $ifNull: ["$extracost", 0] }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      
+      // Group for statistics
       {
         $group: {
           _id: null,
+          // Basic counts
           totalProjects: { $sum: 1 },
-          totalextracost: { $sum: "$extracost" },
+          
+          // Budget related
+          totalBudget: { $sum: { $ifNull: ["$budget", 0] } },
+          totalExtracost: { $sum: { $ifNull: ["$extracost", 0] } },
+          totalAttributeValue: { $sum: { $ifNull: ["$calculatedProjectTotal", 0] } },
+          totalFinalValue: { $sum: { $ifNull: ["$finalProjectTotal", 0] } },
+          
+          // Averages
           averageProgress: { $avg: "$progressPercentage" },
-          projectsByStatus: { $push: "$projectStatus" }, // Fixed: was siteStatus
-          projectsByApproval: { $push: "$approvalStatus" },
-        },
+          averageBudget: { $avg: { $ifNull: ["$budget", 0] } },
+          averageProjectValue: { $avg: { $ifNull: ["$finalProjectTotal", 0] } },
+          
+          // Min/Max
+          minBudget: { $min: { $ifNull: ["$budget", 0] } },
+          maxBudget: { $max: { $ifNull: ["$budget", 0] } },
+          minProjectValue: { $min: { $ifNull: ["$finalProjectTotal", 0] } },
+          maxProjectValue: { $max: { $ifNull: ["$finalProjectTotal", 0] } },
+          
+          // Collect arrays for breakdowns
+          projectStatuses: { $push: "$projectStatus" },
+          approvalStatuses: { $push: "$approvalStatus" },
+          
+          // Budget variance tracking
+          budgetVariances: { $push: "$budgetVariance" },
+          overBudgetCount: {
+            $sum: {
+              $cond: [
+                { $lt: ["$budgetVariance", 0] }, // Negative variance = over budget
+                1,
+                0
+              ]
+            }
+          },
+          underBudgetCount: {
+            $sum: {
+              $cond: [
+                { $gt: ["$budgetVariance", 0] }, // Positive variance = under budget
+                1,
+                0
+              ]
+            }
+          },
+          exactBudgetCount: {
+            $sum: {
+              $cond: [
+                { $eq: ["$budgetVariance", 0] }, // Zero variance = exactly on budget
+                1,
+                0
+              ]
+            }
+          }
+        }
       },
+      
+      // Final projection with all breakdowns
       {
         $project: {
+          _id: 0,
+          // Basic stats
           totalProjects: 1,
-          totalextracost: 1,
+          
+          // Financial summary
+          financialSummary: {
+            totalBudget: { $round: ["$totalBudget", 2] },
+            totalExtracost: { $round: ["$totalExtracost", 2] },
+            totalAttributeValue: { $round: ["$totalAttributeValue", 2] },
+            totalProjectValue: { $round: ["$totalFinalValue", 2] },
+            averageBudget: { $round: ["$averageBudget", 2] },
+            averageProjectValue: { $round: ["$averageProjectValue", 2] },
+            minBudget: { $round: ["$minBudget", 2] },
+            maxBudget: { $round: ["$maxBudget", 2] },
+            minProjectValue: { $round: ["$minProjectValue", 2] },
+            maxProjectValue: { $round: ["$maxProjectValue", 2] }
+          },
+          
+          // Progress
           averageProgress: { $round: ["$averageProgress", 2] },
+          
+          // Budget health
+          budgetHealth: {
+            overBudget: "$overBudgetCount",
+            underBudget: "$underBudgetCount",
+            exactBudget: "$exactBudgetCount",
+            overBudgetPercentage: {
+              $round: [
+                {
+                  $multiply: [
+                    { $divide: ["$overBudgetCount", "$totalProjects"] },
+                    100
+                  ]
+                },
+                2
+              ]
+            }
+          },
+          
+          // Status breakdowns
           projectStatusBreakdown: {
-            // Fixed: was siteStatusBreakdown
             planning: {
               $size: {
                 $filter: {
-                  input: "$projectsByStatus",
+                  input: "$projectStatuses",
                   as: "status",
                   cond: { $eq: ["$$status", "planning"] },
                 },
@@ -1731,7 +1953,7 @@ export const getProjectStats = async (req, res) => {
             in_progress: {
               $size: {
                 $filter: {
-                  input: "$projectsByStatus",
+                  input: "$projectStatuses",
                   as: "status",
                   cond: { $eq: ["$$status", "in_progress"] },
                 },
@@ -1740,7 +1962,7 @@ export const getProjectStats = async (req, res) => {
             on_hold: {
               $size: {
                 $filter: {
-                  input: "$projectsByStatus",
+                  input: "$projectStatuses",
                   as: "status",
                   cond: { $eq: ["$$status", "on_hold"] },
                 },
@@ -1749,18 +1971,20 @@ export const getProjectStats = async (req, res) => {
             completed: {
               $size: {
                 $filter: {
-                  input: "$projectsByStatus",
+                  input: "$projectStatuses",
                   as: "status",
                   cond: { $eq: ["$$status", "completed"] },
                 },
               },
             },
           },
+          
+          // Approval breakdown
           approvalBreakdown: {
             pending: {
               $size: {
                 $filter: {
-                  input: "$projectsByApproval",
+                  input: "$approvalStatuses",
                   as: "status",
                   cond: { $eq: ["$$status", "pending"] },
                 },
@@ -1769,7 +1993,7 @@ export const getProjectStats = async (req, res) => {
             approved: {
               $size: {
                 $filter: {
-                  input: "$projectsByApproval",
+                  input: "$approvalStatuses",
                   as: "status",
                   cond: { $eq: ["$$status", "approved"] },
                 },
@@ -1778,40 +2002,124 @@ export const getProjectStats = async (req, res) => {
             rejected: {
               $size: {
                 $filter: {
-                  input: "$projectsByApproval",
+                  input: "$approvalStatuses",
                   as: "status",
                   cond: { $eq: ["$$status", "rejected"] },
                 },
               },
             },
           },
-        },
-      },
+          
+          // Additional metrics
+          budgetUtilization: {
+            total: { $round: ["$totalFinalValue", 2] },
+            vs: { $round: ["$totalBudget", 2] },
+            ratio: {
+              $round: [
+                {
+                  $cond: [
+                    { $gt: ["$totalBudget", 0] },
+                    { $divide: ["$totalFinalValue", "$totalBudget"] },
+                    0
+                  ]
+                },
+                2
+              ]
+            },
+            percentage: {
+              $round: [
+                {
+                  $cond: [
+                    { $gt: ["$totalBudget", 0] },
+                    { $multiply: [{ $divide: ["$totalFinalValue", "$totalBudget"] }, 100] },
+                    0
+                  ]
+                },
+                2
+              ]
+            }
+          }
+        }
+      }
     ]);
+
+    // Get additional stats for chart data (optional)
+    const monthlyStats = await Project.aggregate([
+      { $match: matchStage },
+      {
+        $group: {
+          _id: {
+            year: { $year: "$createdAt" },
+            month: { $month: "$createdAt" }
+          },
+          count: { $sum: 1 },
+          totalValue: { $sum: { $ifNull: ["$budget", 0] } }
+        }
+      },
+      { $sort: { "_id.year": -1, "_id.month": -1 } },
+      { $limit: 12 }
+    ]);
+
+    // Format monthly stats
+    const monthlyData = monthlyStats.map(stat => ({
+      month: `${stat._id.year}-${stat._id.month.toString().padStart(2, '0')}`,
+      projects: stat.count,
+      value: stat.totalValue
+    }));
 
     res.json({
       success: true,
       data: stats[0] || {
         totalProjects: 0,
-        totalextracost: 0,
+        financialSummary: {
+          totalBudget: 0,
+          totalExtracost: 0,
+          totalAttributeValue: 0,
+          totalProjectValue: 0,
+          averageBudget: 0,
+          averageProjectValue: 0,
+          minBudget: 0,
+          maxBudget: 0,
+          minProjectValue: 0,
+          maxProjectValue: 0
+        },
         averageProgress: 0,
+        budgetHealth: {
+          overBudget: 0,
+          underBudget: 0,
+          exactBudget: 0,
+          overBudgetPercentage: 0
+        },
         projectStatusBreakdown: {
-          // Fixed: was siteStatusBreakdown
           planning: 0,
           in_progress: 0,
           on_hold: 0,
           completed: 0,
         },
-        approvalBreakdown: { pending: 0, approved: 0, rejected: 0 },
+        approvalBreakdown: { 
+          pending: 0, 
+          approved: 0, 
+          rejected: 0 
+        },
+        budgetUtilization: {
+          total: 0,
+          vs: 0,
+          ratio: 0,
+          percentage: 0
+        }
       },
+      monthlyTrends: monthlyData
     });
+
   } catch (error) {
+    console.error("Get Project Stats Error:", error);
     res.status(500).json({
       success: false,
       message: error.message,
     });
   }
 };
+
 
 // Add new endpoint to update phase completion
 export const updatePhaseCompletion = async (req, res) => {
