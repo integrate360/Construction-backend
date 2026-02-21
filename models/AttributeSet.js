@@ -15,12 +15,6 @@ const attributeSetSchema = new mongoose.Schema(
           ref: "Attribute",
           required: true,
         },
-        quantity: {
-          type: Number,
-          required: true,
-          min: 1,
-          default: 1,
-        },
       },
     ],
     createdBy: {
