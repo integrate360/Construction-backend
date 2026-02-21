@@ -1,22 +1,76 @@
 import AttributeSet from "../models/AttributeSet.js";
 
-/**
- * CREATE ATTRIBUTE SET
- */
+
+
 export const createAttributeSet = async (req, res) => {
   try {
     const { name, attributes } = req.body;
 
+    // Validate input
+    if (!name) {
+      return res.status(400).json({
+        success: false,
+        message: "Name is required",
+      });
+    }
+
+    if (!attributes || !Array.isArray(attributes) || attributes.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "At least one attribute is required",
+      });
+    }
+
+    // Validate each attribute has required fields including quantity
+    for (let i = 0; i < attributes.length; i++) {
+      const item = attributes[i];
+      
+      if (!item.attribute) {
+        return res.status(400).json({
+          success: false,
+          message: `Attribute ${i + 1}: attribute ID is required`,
+        });
+      }
+      
+      // Check if quantity is provided and valid
+      if (item.quantity === undefined || item.quantity === null) {
+        return res.status(400).json({
+          success: false,
+          message: `Attribute ${i + 1}: quantity is required`,
+        });
+      }
+      
+      if (typeof item.quantity !== 'number' || item.quantity < 1) {
+        return res.status(400).json({
+          success: false,
+          message: `Attribute ${i + 1}: quantity must be a number greater than or equal to 1`,
+        });
+      }
+    }
+
+    // Create attribute set with proper structure
     const attributeSet = await AttributeSet.create({
       name,
-      attributes,
-      createdBy: req.user._id, // ✅ important
+      attributes: attributes.map(item => ({
+        attribute: item.attribute,
+        quantity: item.quantity // Ensure quantity is included
+      })),
+      createdBy: req.user._id,
     });
+
+    // Populate the response to show attribute details
+    const populatedSet = await AttributeSet.findById(attributeSet._id)
+      .populate({
+        path: "attributes.attribute",
+        model: "Attribute",
+        select: "name value type" // Select only needed fields
+      })
+      .populate("createdBy", "name email");
 
     res.status(201).json({
       success: true,
       message: "Attribute set created successfully",
-      data: attributeSet,
+      data: populatedSet,
     });
   } catch (error) {
     console.error("🔥 createAttributeSet error:", error);
@@ -27,9 +81,7 @@ export const createAttributeSet = async (req, res) => {
   }
 };
 
-/**
- * GET ALL ATTRIBUTE SETS
- */
+
 export const getAllAttributeSets = async (req, res) => {
   try {
     console.log("👉 Get AttributeSets User:", {
@@ -134,15 +186,86 @@ export const updateAttributeSet = async (req, res) => {
 
     const { name, attributes } = req.body;
 
-    attributeSet.name = name ?? attributeSet.name;
-    attributeSet.attributes = attributes ?? attributeSet.attributes;
+    // Update name if provided
+    if (name !== undefined) {
+      attributeSet.name = name;
+    }
+
+    // Update attributes if provided with validation
+    if (attributes !== undefined) {
+      // Validate that attributes is an array
+      if (!Array.isArray(attributes)) {
+        return res.status(400).json({
+          success: false,
+          message: "Attributes must be an array",
+        });
+      }
+
+      // Validate that array is not empty
+      if (attributes.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: "Attributes array cannot be empty",
+        });
+      }
+
+      // Validate each attribute has required fields including quantity
+      for (let i = 0; i < attributes.length; i++) {
+        const item = attributes[i];
+        
+        if (!item.attribute) {
+          return res.status(400).json({
+            success: false,
+            message: `Attribute ${i + 1}: attribute ID is required`,
+          });
+        }
+        
+        // Check if quantity is provided and valid
+        if (item.quantity === undefined || item.quantity === null) {
+          return res.status(400).json({
+            success: false,
+            message: `Attribute ${i + 1}: quantity is required`,
+          });
+        }
+        
+        if (typeof item.quantity !== 'number' || item.quantity < 1) {
+          return res.status(400).json({
+            success: false,
+            message: `Attribute ${i + 1}: quantity must be a number greater than or equal to 1`,
+          });
+        }
+
+        // Validate attribute ID format
+        if (!mongoose.Types.ObjectId.isValid(item.attribute)) {
+          return res.status(400).json({
+            success: false,
+            message: `Attribute ${i + 1}: invalid attribute ID format`,
+          });
+        }
+      }
+
+      // Update attributes with proper structure
+      attributeSet.attributes = attributes.map(item => ({
+        attribute: item.attribute,
+        quantity: item.quantity // Ensure quantity is included
+      }));
+    }
 
     await attributeSet.save();
+
+    // Populate the response to show updated attribute details
+    const updatedSet = await AttributeSet.findById(attributeSet._id)
+      .populate({
+        path: "attributes.attribute",
+        model: "Attribute",
+        select: "name value type" // Select only needed fields
+      })
+      .populate("createdBy", "name email");
 
     res.status(200).json({
       success: true,
       message: "Attribute set updated successfully",
-      data: attributeSet,
+      data: updatedSet,
     });
   } catch (error) {
     console.error("🔥 updateAttributeSet error:", error);
@@ -152,7 +275,6 @@ export const updateAttributeSet = async (req, res) => {
     });
   }
 };
-
 /**
  * DELETE ATTRIBUTE SET
  */
