@@ -10,9 +10,17 @@ const attributeSetSchema = new mongoose.Schema(
 
     attributes: [
       {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "Attribute",
-        required: true,
+        attribute: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "Attribute",
+          required: true,
+        },
+        quantity: {
+          type: Number,
+          required: true,
+          min: 1,
+          default: 1,
+        },
       },
     ],
     createdBy: {
