@@ -8,7 +8,7 @@ export const createAttributeSet = async (req, res) => {
     const attributeSet = await AttributeSet.create({
       name,
       attributes,
-      createdBy: req.user._id, // ✅ important
+      createdBy: req.user._id, 
     });
 
     res.status(201).json({

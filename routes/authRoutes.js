@@ -11,6 +11,7 @@ import {
   updateUserByAdmin,
   deactivateUser,
   activateUser,
+  getAllUsernotclient
 } from "../controllers/authController.js";
 
 import authMiddleware from "../middleware/authmiddleware.js";
@@ -30,6 +31,11 @@ router.get(
   "/getallusers",
   authMiddleware,
   getAllUsers
+);
+router.get(
+  "/getAllUsernotclient",
+  authMiddleware,
+  getAllUsernotclient
 );
 
 router.get(

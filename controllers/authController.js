@@ -696,6 +696,117 @@ export const getAllUsers = async (req, res, next) => {
   }
 };
 
+export const getAllUsernotclient = async (req, res, next) => {
+  try {
+    const {
+      role,
+      isActive,
+      search,
+      page = 1,
+      limit = 10,
+      sortBy = "createdAt",
+      sortOrder = "desc",
+    } = req.query;
+
+    let filter = {}; // Use let instead of const to allow reassignment
+
+    // EXCLUDE CLIENTS BY DEFAULT
+    filter.role = { $ne: "client" };
+
+    if (role) filter.role = role; // This will override the exclusion if role is specified
+    if (isActive !== undefined) filter.isActive = isActive === "true";
+
+    // Apply data access rules based on user role
+    const currentUserRole = req.user.role;
+    const currentUserId = req.user.id;
+    console.log(currentUserRole, currentUserId);
+
+    if (currentUserRole === "saas_admin") {
+      // SaaS Admin can see all users
+      // No additional filters needed
+    } else if (currentUserRole === "super_admin") {
+      // Super Admin can only see users associated with them
+      // This includes all roles (labour, site_manager, etc.)
+      filter.associatedWithUser = currentUserId;
+    } else {
+      // Other roles (site_manager, client, labour) can only see users associated with them
+      // And only if they have permission (labour might not need to see any users)
+      if (currentUserRole === "site_manager" || currentUserRole === "client") {
+        filter.associatedWithUser = currentUserId;
+      } else {
+        // Labour role - maybe they don't need to see any users
+        // Or they can only see themselves
+        filter._id = currentUserId;
+      }
+    }
+
+    // Handle search separately to avoid circular references
+    if (search) {
+      const searchFilter = {
+        $or: [
+          { name: { $regex: search, $options: "i" } },
+          { email: { $regex: search, $options: "i" } },
+          { address: { $regex: search, $options: "i" } },
+          { gstNumber: { $regex: search, $options: "i" } },
+        ],
+      };
+
+      // If there are existing filters, combine them properly
+      if (Object.keys(filter).length > 0) {
+        // Create a new filter object with $and that combines existing filter and searchFilter
+        filter = {
+          $and: [filter, searchFilter],
+        };
+      } else {
+        // If no existing filters, just use the search filter
+        filter = searchFilter;
+      }
+    }
+
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const skip = (pageNum - 1) * limitNum;
+    const sort = {};
+    sort[sortBy] = sortOrder === "desc" ? -1 : 1;
+
+    // Execute queries with population
+    const users = await User.find(filter)
+      .select("-password")
+      .sort(sort)
+      .skip(skip)
+      .limit(limitNum)
+      .populate("associatedWithUser", "name email role");
+
+    const totalUsers = await User.countDocuments(filter);
+
+    const totalPages = Math.ceil(totalUsers / limitNum);
+    const hasNextPage = pageNum < totalPages;
+    const hasPrevPage = pageNum > 1;
+
+    res.json({
+      success: true,
+      data: {
+        users,
+        pagination: {
+          currentPage: pageNum,
+          totalPages,
+          totalUsers,
+          limit: limitNum,
+          hasNextPage,
+          hasPrevPage,
+          nextPage: hasNextPage ? pageNum + 1 : null,
+          prevPage: hasPrevPage ? pageNum - 1 : null,
+        },
+      },
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message || "Failed to fetch users",
+    });
+  }
+};
+
 export const getUserById = async (req, res, next) => {
   try {
     const user = await User.findById(req.params.id)
