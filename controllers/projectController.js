@@ -67,20 +67,36 @@ export const createProject = async (req, res) => {
       }
     }
 
-    // ✅ Validate project manager ONLY if provided
+    // ✅ Validate site_manager ONLY if provided
     if (site_manager) {
       const pmExists = await User.findById(site_manager);
       if (!pmExists) {
         return res.status(404).json({
           success: false,
-          message: "Project Manager not found",
+          message: "Site Manager not found",
         });
       }
 
       if (pmExists.role !== "site_manager") {
         return res.status(400).json({
           success: false,
-          message: "Assigned project manager must have the 'site_manager' role",
+          message: "Assigned site manager must have the 'site_manager' role",
+        });
+      }
+    }
+
+    // ✅ Validate labour ONLY if provided
+    if (labour && labour.length > 0) {
+      const labourIds = Array.isArray(labour) ? labour : [labour];
+      const labourUsers = await User.find({
+        _id: { $in: labourIds },
+        role: "labour",
+      });
+
+      if (labourUsers.length !== labourIds.length) {
+        return res.status(400).json({
+          success: false,
+          message: "One or more users are not valid labour",
         });
       }
     }
@@ -102,21 +118,54 @@ export const createProject = async (req, res) => {
       });
     }
 
+    // ✅ Validate phases if provided
+    if (phases && phases.length > 0) {
+      const validPhases = phases.every((phase) =>
+        ["FOUNDATION", "STRUCTURE", "FINISHING", "HANDOVER"].includes(
+          phase.phaseName,
+        ),
+      );
+      if (!validPhases) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Invalid phase name. Must be one of: FOUNDATION, STRUCTURE, FINISHING, HANDOVER",
+        });
+      }
+    }
+
+    // ✅ Calculate initial progress from phases
+    let progressPercentage = 0;
+    if (phases && phases.length > 0) {
+      const completedPhases = phases.filter((p) => p.isCompleted).length;
+      progressPercentage = (completedPhases / phases.length) * 100;
+    }
+
+    // ✅ Determine project status based on progress
+    let projectStatus = "planning";
+    if (progressPercentage > 0 && progressPercentage < 100) {
+      projectStatus = "in_progress";
+    } else if (progressPercentage === 100) {
+      projectStatus = "completed";
+    }
+
     // ✅ Create project
     const project = await Project.create({
       projectName,
       siteName,
       location,
       client: client || null,
-      labour: labour || null,
+      labour: labour || [],
       site_manager: site_manager || null,
       createdBy: req.user._id,
       AttributeSet: attributeSetArray,
       startDate,
       expectedEndDate,
       budget,
-      phases,
-      documents,
+      phases: phases || [],
+      documents: documents || [],
+      progressPercentage,
+      projectStatus,
     });
 
     // ✅ Populate response
@@ -145,7 +194,7 @@ export const getProjects = async (req, res) => {
     const {
       page = 1,
       limit = 10,
-      siteStatus,
+      projectStatus, // Fixed: was siteStatus
       approvalStatus,
       client,
       labour,
@@ -159,13 +208,15 @@ export const getProjects = async (req, res) => {
     const filter = buildRoleFilter(req.user);
 
     // Status filters apply to all roles
-    if (siteStatus) filter.siteStatus = siteStatus;
+    if (projectStatus) filter.projectStatus = projectStatus; // Fixed: was siteStatus
     if (approvalStatus) filter.approvalStatus = approvalStatus;
 
     // Only admins can additionally filter by client/site_manager from query
     if (isAdmin(req.user.role)) {
       if (client) filter.client = client;
       if (site_manager) filter.site_manager = site_manager;
+      if (labour)
+        filter.labour = { $in: Array.isArray(labour) ? labour : [labour] };
     }
 
     // Search filter
@@ -175,6 +226,8 @@ export const getProjects = async (req, res) => {
         { siteName: { $regex: search, $options: "i" } },
         { "location.city": { $regex: search, $options: "i" } },
         { "location.address": { $regex: search, $options: "i" } },
+        { "location.state": { $regex: search, $options: "i" } },
+        { "location.pincode": { $regex: search, $options: "i" } },
       ];
     }
 
@@ -191,7 +244,6 @@ export const getProjects = async (req, res) => {
           path: "attributes",
         },
       })
-
       .sort({ [sortBy]: sortOrder === "desc" ? -1 : 1 })
       .skip(skip)
       .limit(parseInt(limit));
@@ -223,7 +275,10 @@ export const getProjectById = async (req, res) => {
       .populate("site_manager", "name email phoneNumber")
       .populate("labour", "name email phoneNumber")
       .populate("createdBy", "name email")
-      .populate("AttributeSet"); // Populate AttributeSet
+      .populate({
+        path: "AttributeSet",
+        populate: { path: "attributes" },
+      });
 
     if (!project) {
       return res.status(404).json({
@@ -253,7 +308,6 @@ export const getProjectById = async (req, res) => {
 
 export const updateProject = async (req, res) => {
   try {
-    // ❌ Client & Labour cannot update projects
     if (req.user.role === "client" || req.user.role === "labour") {
       return res.status(403).json({
         success: false,
@@ -301,12 +355,12 @@ export const updateProject = async (req, res) => {
       }
     }
 
-    // ✅ Project Manager validation
+    // ✅ Site Manager validation
     if (req.body.site_manager !== undefined) {
       if (!isAdmin(req.user.role)) {
         return res.status(403).json({
           success: false,
-          message: "Only admins can assign project manager",
+          message: "Only admins can assign site manager",
         });
       }
 
@@ -315,14 +369,13 @@ export const updateProject = async (req, res) => {
         if (!pm || pm.role !== "site_manager") {
           return res.status(400).json({
             success: false,
-            message:
-              "Assigned project manager must have role 'site_manager'",
+            message: "Assigned site manager must have role 'site_manager'",
           });
         }
       }
     }
 
-    // ✅ Labour validation (🔥 FIXED PART)
+    // ✅ Labour validation
     if (req.body.labour !== undefined) {
       if (!isAdmin(req.user.role)) {
         return res.status(403).json({
@@ -331,25 +384,34 @@ export const updateProject = async (req, res) => {
         });
       }
 
-      const labourIds = Array.isArray(req.body.labour)
-        ? req.body.labour
-        : [req.body.labour];
+      if (req.body.labour && req.body.labour.length > 0) {
+        const labourIds = Array.isArray(req.body.labour)
+          ? req.body.labour
+          : [req.body.labour];
 
-      const labourUsers = await User.find({
-        _id: { $in: labourIds },
-        role: "labour",
-      });
-
-      if (labourUsers.length !== labourIds.length) {
-        return res.status(400).json({
-          success: false,
-          message: "One or more users are not valid labour",
+        const labourUsers = await User.find({
+          _id: { $in: labourIds },
+          role: "labour",
         });
+
+        if (labourUsers.length !== labourIds.length) {
+          return res.status(400).json({
+            success: false,
+            message: "One or more users are not valid labour",
+          });
+        }
       }
     }
 
     // ✅ AttributeSet validation
     if (req.body.AttributeSet) {
+      if (!isAdmin(req.user.role)) {
+        return res.status(403).json({
+          success: false,
+          message: "Only admins can update AttributeSet",
+        });
+      }
+
       const ids = Array.isArray(req.body.AttributeSet)
         ? req.body.AttributeSet
         : [req.body.AttributeSet];
@@ -364,6 +426,24 @@ export const updateProject = async (req, res) => {
           message: "One or more AttributeSets not found",
         });
       }
+      project.AttributeSet = ids;
+    }
+
+    // ✅ Phase validation
+    if (req.body.phases) {
+      const validPhases = req.body.phases.every((phase) =>
+        ["FOUNDATION", "STRUCTURE", "FINISHING", "HANDOVER"].includes(
+          phase.phaseName,
+        ),
+      );
+      if (!validPhases) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Invalid phase name. Must be one of: FOUNDATION, STRUCTURE, FINISHING, HANDOVER",
+        });
+      }
+      project.phases = req.body.phases;
     }
 
     /* ===============================
@@ -377,52 +457,60 @@ export const updateProject = async (req, res) => {
       "client",
       "labour",
       "site_manager",
-      "AttributeSet",
       "startDate",
       "expectedEndDate",
       "budget",
-      "siteStatus",
+      "projectStatus", // Fixed: was siteStatus
       "phases",
       "documents",
       "approvalStatus",
     ];
 
-    const siteManagerFields = ["siteStatus", "phases", "documents"];
+    const siteManagerFields = [
+      "projectStatus", // Fixed: was siteStatus
+      "phases",
+      "documents",
+    ];
 
     const allowedFields = isAdmin(req.user.role)
       ? adminFields
       : siteManagerFields;
 
     allowedFields.forEach((field) => {
-      if (req.body[field] !== undefined) {
+      if (
+        req.body[field] !== undefined &&
+        field !== "phases" &&
+        field !== "AttributeSet" &&
+        field !== "labour" &&
+        field !== "client" &&
+        field !== "site_manager"
+      ) {
         project[field] = req.body[field];
       }
     });
 
     /* ===============================
-       AUTO PROGRESS
+       AUTO PROGRESS & STATUS
     =============================== */
 
+    // Recalculate progress if phases were updated
     if (req.body.phases) {
       const total = project.phases.length;
-      const completed = project.phases.filter(p => p.isCompleted).length;
+      const completed = project.phases.filter((p) => p.isCompleted).length;
 
-      project.progressPercentage =
-        total > 0 ? (completed / total) * 100 : 0;
+      project.progressPercentage = total > 0 ? (completed / total) * 100 : 0;
 
-      project.projectStatus =
-        project.progressPercentage === 0
-          ? "not_started"
-          : project.progressPercentage === 100
-            ? "completed"
-            : "running";
+      // Update project status based on progress
+      if (project.progressPercentage === 0) {
+        project.projectStatus = "planning";
+      } else if (project.progressPercentage === 100) {
+        project.projectStatus = "completed";
+      } else {
+        project.projectStatus = "in_progress";
+      }
     }
 
     await project.save();
-
-    /* ===============================
-       RESPONSE
-    =============================== */
 
     const populatedProject = await Project.findById(project._id)
       .populate("client", "name email phoneNumber")
@@ -493,6 +581,7 @@ export const getProjectStats = async (req, res) => {
         message: "Only admins can view project statistics",
       });
     }
+
     const matchStage = isGlobalAdmin(req.user.role)
       ? {}
       : { createdBy: req.user._id };
@@ -505,7 +594,7 @@ export const getProjectStats = async (req, res) => {
           totalProjects: { $sum: 1 },
           totalBudget: { $sum: "$budget" },
           averageProgress: { $avg: "$progressPercentage" },
-          projectsByStatus: { $push: "$siteStatus" },
+          projectsByStatus: { $push: "$projectStatus" }, // Fixed: was siteStatus
           projectsByApproval: { $push: "$approvalStatus" },
         },
       },
@@ -514,7 +603,8 @@ export const getProjectStats = async (req, res) => {
           totalProjects: 1,
           totalBudget: 1,
           averageProgress: { $round: ["$averageProgress", 2] },
-          siteStatusBreakdown: {
+          projectStatusBreakdown: {
+            // Fixed: was siteStatusBreakdown
             planning: {
               $size: {
                 $filter: {
@@ -591,7 +681,8 @@ export const getProjectStats = async (req, res) => {
         totalProjects: 0,
         totalBudget: 0,
         averageProgress: 0,
-        siteStatusBreakdown: {
+        projectStatusBreakdown: {
+          // Fixed: was siteStatusBreakdown
           planning: 0,
           in_progress: 0,
           on_hold: 0,
@@ -599,6 +690,70 @@ export const getProjectStats = async (req, res) => {
         },
         approvalBreakdown: { pending: 0, approved: 0, rejected: 0 },
       },
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+// Add new endpoint to update phase completion
+export const updatePhaseCompletion = async (req, res) => {
+  try {
+    const { projectId, phaseIndex } = req.params;
+    const { isCompleted } = req.body;
+
+    const project = await Project.findById(projectId);
+    if (!project) {
+      return res.status(404).json({
+        success: false,
+        message: "Project not found",
+      });
+    }
+
+    if (!canAccessProject(req.user, project)) {
+      return res.status(403).json({
+        success: false,
+        message: "Not authorized to update this project",
+      });
+    }
+
+    if (!project.phases || !project.phases[phaseIndex]) {
+      return res.status(404).json({
+        success: false,
+        message: "Phase not found",
+      });
+    }
+
+    // Update phase completion
+    project.phases[phaseIndex].isCompleted = isCompleted;
+    if (isCompleted) {
+      project.phases[phaseIndex].completionPercentage = 100;
+    } else {
+      project.phases[phaseIndex].completionPercentage = 0;
+    }
+
+    // Recalculate overall progress
+    const total = project.phases.length;
+    const completed = project.phases.filter((p) => p.isCompleted).length;
+    project.progressPercentage = total > 0 ? (completed / total) * 100 : 0;
+
+    // Update project status
+    if (project.progressPercentage === 0) {
+      project.projectStatus = "planning";
+    } else if (project.progressPercentage === 100) {
+      project.projectStatus = "completed";
+    } else {
+      project.projectStatus = "in_progress";
+    }
+
+    await project.save();
+
+    res.json({
+      success: true,
+      data: project,
     });
   } catch (error) {
     res.status(500).json({

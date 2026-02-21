@@ -5,6 +5,17 @@ const locationSchema = new mongoose.Schema(
     city: { type: String, trim: true },
     state: { type: String, trim: true },
     pincode: { type: String, trim: true },
+    coordinates: {
+      type: {
+        type: String,
+        enum: ["Point"],
+        default: "Point",
+      },
+      coordinates: {
+        type: [Number],
+        index: "2dsphere",
+      },
+    },
   },
   { _id: false },
 );
@@ -118,16 +129,10 @@ const projectSchema = new mongoose.Schema(
       max: 100,
     },
 
-    siteStatus: {
+    projectStatus: {
       type: String,
       enum: ["planning", "in_progress", "on_hold", "completed"],
       default: "planning",
-    },
-
-    projectStatus: {
-      type: String,
-      enum: ["not_started", "running", "completed"],
-      default: "not_started",
     },
 
     phases: {
