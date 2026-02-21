@@ -1,7 +1,5 @@
 import AttributeSet from "../models/AttributeSet.js";
 
-
-
 export const createAttributeSet = async (req, res) => {
   try {
     const { name, attributes } = req.body;
@@ -24,14 +22,14 @@ export const createAttributeSet = async (req, res) => {
     // Validate each attribute has required fields including quantity
     for (let i = 0; i < attributes.length; i++) {
       const item = attributes[i];
-      
+
       if (!item.attribute) {
         return res.status(400).json({
           success: false,
           message: `Attribute ${i + 1}: attribute ID is required`,
         });
       }
-      
+
       // Check if quantity is provided and valid
       if (item.quantity === undefined || item.quantity === null) {
         return res.status(400).json({
@@ -39,8 +37,8 @@ export const createAttributeSet = async (req, res) => {
           message: `Attribute ${i + 1}: quantity is required`,
         });
       }
-      
-      if (typeof item.quantity !== 'number' || item.quantity < 1) {
+
+      if (typeof item.quantity !== "number" || item.quantity < 1) {
         return res.status(400).json({
           success: false,
           message: `Attribute ${i + 1}: quantity must be a number greater than or equal to 1`,
@@ -51,9 +49,9 @@ export const createAttributeSet = async (req, res) => {
     // Create attribute set with proper structure
     const attributeSet = await AttributeSet.create({
       name,
-      attributes: attributes.map(item => ({
+      attributes: attributes.map((item) => ({
         attribute: item.attribute,
-        quantity: item.quantity // Ensure quantity is included
+        quantity: item.quantity, // Ensure quantity is included
       })),
       createdBy: req.user._id,
     });
@@ -63,7 +61,7 @@ export const createAttributeSet = async (req, res) => {
       .populate({
         path: "attributes.attribute",
         model: "Attribute",
-        select: "name value type" // Select only needed fields
+        select: "name value type", // Select only needed fields
       })
       .populate("createdBy", "name email");
 
@@ -81,7 +79,6 @@ export const createAttributeSet = async (req, res) => {
   }
 };
 
-
 export const getAllAttributeSets = async (req, res) => {
   try {
     console.log("👉 Get AttributeSets User:", {
@@ -97,16 +94,44 @@ export const getAllAttributeSets = async (req, res) => {
     }
 
     const attributeSets = await AttributeSet.find(filter)
-      .populate("attributes")
-       .populate(
-      "createdBy"
-    )
+      .populate({
+        path: "attributes",
+        populate: {
+          path: "attribute",
+          model: "Attribute"
+        }
+      })
+      .populate("createdBy")
       .sort({ createdAt: -1 });
+
+    // Calculate total value for each attribute set
+    const attributeSetsWithTotal = attributeSets.map(set => {
+      // Convert to plain object if it's a Mongoose document
+      const setObj = set.toObject ? set.toObject() : set;
+      
+      // Calculate total by summing (quantity * attribute.pricing)
+      let setTotal = 0;
+      
+      if (setObj.attributes && Array.isArray(setObj.attributes)) {
+        setObj.attributes.forEach(item => {
+          if (item.attribute && item.attribute.pricing && item.quantity) {
+            const itemTotal = item.quantity * item.attribute.pricing;
+            setTotal += itemTotal;
+          }
+        });
+      }
+      
+      // Add the calculated total to the response
+      return {
+        ...setObj,
+        setTotal: setTotal
+      };
+    });
 
     res.status(200).json({
       success: true,
-      count: attributeSets.length,
-      data: attributeSets,
+      count: attributeSetsWithTotal.length,
+      data: attributeSetsWithTotal,
     });
   } catch (error) {
     console.error("🔥 getAllAttributeSets error:", error);
@@ -123,12 +148,14 @@ export const getAllAttributeSets = async (req, res) => {
 export const getAttributeSetById = async (req, res) => {
   try {
     const attributeSet = await AttributeSet.findById(req.params.id)
-    .populate(
-      "attributes"
-    )
-    .populate(
-      "createdBy"
-    );
+      .populate({
+        path: "attributes",
+        populate: {
+          path: "attribute",
+          model: "Attribute"
+        }
+      })
+      .populate("createdBy");
 
     if (!attributeSet) {
       return res.status(404).json({
@@ -139,7 +166,7 @@ export const getAttributeSetById = async (req, res) => {
 
     // Permission check
     if (req.user.role !== "saas_admin") {
-      if (attributeSet.createdBy.toString() !== req.user._id.toString()) {
+      if (attributeSet.createdBy._id.toString() !== req.user._id.toString()) {
         return res.status(403).json({
           success: false,
           message: "You are not allowed to view this attribute set",
@@ -147,9 +174,40 @@ export const getAttributeSetById = async (req, res) => {
       }
     }
 
+    // Calculate total value
+    const setObj = attributeSet.toObject ? attributeSet.toObject() : attributeSet;
+    
+    let setTotal = 0;
+    let validAttributes = 0;
+    
+    if (setObj.attributes && Array.isArray(setObj.attributes)) {
+      setObj.attributes.forEach(item => {
+        if (item.attribute && item.attribute.pricing && item.quantity) {
+          const itemTotal = item.quantity * item.attribute.pricing;
+          setTotal += itemTotal;
+          validAttributes++;
+          
+          // Add item total to the response for frontend use
+          item.itemTotal = itemTotal;
+        } else {
+          item.itemTotal = 0;
+          item.isValid = false;
+        }
+      });
+    }
+
+    // Add calculated fields to response
+    const responseData = {
+      ...setObj,
+      setTotal: setTotal,
+      validAttributes: validAttributes,
+      totalAttributes: setObj.attributes?.length || 0,
+      attributeCount: setObj.attributes?.length || 0
+    };
+
     res.status(200).json({
       success: true,
-      data: attributeSet,
+      data: responseData,
     });
   } catch (error) {
     console.error("🔥 getAttributeSetById error:", error);
@@ -212,14 +270,14 @@ export const updateAttributeSet = async (req, res) => {
       // Validate each attribute has required fields including quantity
       for (let i = 0; i < attributes.length; i++) {
         const item = attributes[i];
-        
+
         if (!item.attribute) {
           return res.status(400).json({
             success: false,
             message: `Attribute ${i + 1}: attribute ID is required`,
           });
         }
-        
+
         // Check if quantity is provided and valid
         if (item.quantity === undefined || item.quantity === null) {
           return res.status(400).json({
@@ -227,8 +285,8 @@ export const updateAttributeSet = async (req, res) => {
             message: `Attribute ${i + 1}: quantity is required`,
           });
         }
-        
-        if (typeof item.quantity !== 'number' || item.quantity < 1) {
+
+        if (typeof item.quantity !== "number" || item.quantity < 1) {
           return res.status(400).json({
             success: false,
             message: `Attribute ${i + 1}: quantity must be a number greater than or equal to 1`,
@@ -245,9 +303,9 @@ export const updateAttributeSet = async (req, res) => {
       }
 
       // Update attributes with proper structure
-      attributeSet.attributes = attributes.map(item => ({
+      attributeSet.attributes = attributes.map((item) => ({
         attribute: item.attribute,
-        quantity: item.quantity // Ensure quantity is included
+        quantity: item.quantity, // Ensure quantity is included
       }));
     }
 
@@ -258,7 +316,7 @@ export const updateAttributeSet = async (req, res) => {
       .populate({
         path: "attributes.attribute",
         model: "Attribute",
-        select: "name value type" // Select only needed fields
+        select: "name value type", // Select only needed fields
       })
       .populate("createdBy", "name email");
 
