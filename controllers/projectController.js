@@ -308,6 +308,7 @@ export const getProjectById = async (req, res) => {
 
 export const updateProject = async (req, res) => {
   try {
+    // 🔐 Role check
     if (req.user.role === "client" || req.user.role === "labour") {
       return res.status(403).json({
         success: false,
@@ -346,12 +347,22 @@ export const updateProject = async (req, res) => {
 
       if (req.body.client) {
         const client = await User.findById(req.body.client);
-        if (!client || client.role !== "client") {
-          return res.status(400).json({
+        if (!client) {
+          return res.status(404).json({
             success: false,
-            message: "Assigned user must be a valid client",
+            message: "Client not found",
           });
         }
+
+        if (client.role !== "client") {
+          return res.status(400).json({
+            success: false,
+            message: "Assigned user must have the 'client' role",
+          });
+        }
+        project.client = req.body.client;
+      } else {
+        project.client = null;
       }
     }
 
@@ -365,13 +376,23 @@ export const updateProject = async (req, res) => {
       }
 
       if (req.body.site_manager) {
-        const pm = await User.findById(req.body.site_manager);
-        if (!pm || pm.role !== "site_manager") {
-          return res.status(400).json({
+        const siteManager = await User.findById(req.body.site_manager);
+        if (!siteManager) {
+          return res.status(404).json({
             success: false,
-            message: "Assigned site manager must have role 'site_manager'",
+            message: "Site Manager not found",
           });
         }
+
+        if (siteManager.role !== "site_manager") {
+          return res.status(400).json({
+            success: false,
+            message: "Assigned site manager must have the 'site_manager' role",
+          });
+        }
+        project.site_manager = req.body.site_manager;
+      } else {
+        project.site_manager = null;
       }
     }
 
@@ -400,11 +421,14 @@ export const updateProject = async (req, res) => {
             message: "One or more users are not valid labour",
           });
         }
+        project.labour = labourIds;
+      } else {
+        project.labour = [];
       }
     }
 
     // ✅ AttributeSet validation
-    if (req.body.AttributeSet) {
+    if (req.body.AttributeSet !== undefined) {
       if (!isAdmin(req.user.role)) {
         return res.status(403).json({
           success: false,
@@ -412,106 +436,183 @@ export const updateProject = async (req, res) => {
         });
       }
 
-      const ids = Array.isArray(req.body.AttributeSet)
-        ? req.body.AttributeSet
-        : [req.body.AttributeSet];
+      if (req.body.AttributeSet && req.body.AttributeSet.length > 0) {
+        const attributeSetIds = Array.isArray(req.body.AttributeSet)
+          ? req.body.AttributeSet
+          : [req.body.AttributeSet];
 
-      const count = await AttributeSet.countDocuments({
-        _id: { $in: ids },
-      });
+        const attributeSetCount = await AttributeSet.countDocuments({
+          _id: { $in: attributeSetIds },
+        });
 
-      if (count !== ids.length) {
-        return res.status(404).json({
+        if (attributeSetCount !== attributeSetIds.length) {
+          return res.status(404).json({
+            success: false,
+            message: "One or more AttributeSets not found",
+          });
+        }
+        project.AttributeSet = attributeSetIds;
+      } else {
+        return res.status(400).json({
           success: false,
-          message: "One or more AttributeSets not found",
+          message: "AttributeSet cannot be empty",
         });
       }
-      project.AttributeSet = ids;
     }
 
     // ✅ Phase validation
-    if (req.body.phases) {
-      const validPhases = req.body.phases.every((phase) =>
-        ["FOUNDATION", "STRUCTURE", "FINISHING", "HANDOVER"].includes(
-          phase.phaseName,
-        ),
-      );
-      if (!validPhases) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Invalid phase name. Must be one of: FOUNDATION, STRUCTURE, FINISHING, HANDOVER",
-        });
+    if (req.body.phases !== undefined) {
+      if (req.body.phases && req.body.phases.length > 0) {
+        const validPhases = req.body.phases.every((phase) =>
+          ["FOUNDATION", "STRUCTURE", "FINISHING", "HANDOVER"].includes(
+            phase.phaseName,
+          )
+        );
+
+        if (!validPhases) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "Invalid phase name. Must be one of: FOUNDATION, STRUCTURE, FINISHING, HANDOVER",
+          });
+        }
+
+        // Validate each phase has required fields
+        const phasesValid = req.body.phases.every(
+          (phase) =>
+            phase.hasOwnProperty("completionPercentage") &&
+            phase.hasOwnProperty("isCompleted")
+        );
+
+        if (!phasesValid) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "Each phase must have completionPercentage and isCompleted fields",
+          });
+        }
+
+        project.phases = req.body.phases;
+      } else {
+        project.phases = [];
       }
-      project.phases = req.body.phases;
+    }
+
+    // ✅ Documents validation
+    if (req.body.documents !== undefined) {
+      if (req.body.documents && req.body.documents.length > 0) {
+        // Validate each document has required fields
+        const documentsValid = req.body.documents.every(
+          (doc) => doc.name && doc.url
+        );
+
+        if (!documentsValid) {
+          return res.status(400).json({
+            success: false,
+            message: "Each document must have name and url fields",
+          });
+        }
+        project.documents = req.body.documents;
+      } else {
+        project.documents = [];
+      }
+    }
+
+    // ✅ Location validation
+    if (req.body.location !== undefined) {
+      if (req.body.location) {
+        // Validate coordinates if provided
+        if (req.body.location.coordinates && req.body.location.coordinates.coordinates) {
+          const coords = req.body.location.coordinates.coordinates;
+          if (!Array.isArray(coords) || coords.length !== 2) {
+            return res.status(400).json({
+              success: false,
+              message: "Coordinates must be an array of [longitude, latitude]",
+            });
+          }
+        }
+        project.location = req.body.location;
+      } else {
+        project.location = undefined;
+      }
     }
 
     /* ===============================
-       FIELD PERMISSIONS
+       FIELD UPDATES (COMMON FIELDS)
     =============================== */
 
-    const adminFields = [
+    // Update basic fields (accessible by both admin and site manager)
+    const basicFields = [
       "projectName",
       "siteName",
-      "location",
-      "client",
-      "labour",
-      "site_manager",
       "startDate",
       "expectedEndDate",
       "budget",
-      "projectStatus", // Fixed: was siteStatus
-      "phases",
-      "documents",
+      "projectStatus",
       "approvalStatus",
     ];
 
-    const siteManagerFields = [
-      "projectStatus", // Fixed: was siteStatus
-      "phases",
-      "documents",
-    ];
+    basicFields.forEach((field) => {
+      if (req.body[field] !== undefined) {
+        // Special validation for dates
+        if (field === "expectedEndDate" && req.body.expectedEndDate) {
+          const startDate = req.body.startDate || project.startDate;
+          if (startDate && new Date(req.body.expectedEndDate) < new Date(startDate)) {
+            return res.status(400).json({
+              success: false,
+              message: "End date must be after start date",
+            });
+          }
+        }
+        
+        // Validation for budget
+        if (field === "budget" && req.body.budget < 0) {
+          return res.status(400).json({
+            success: false,
+            message: "Budget cannot be negative",
+          });
+        }
 
-    const allowedFields = isAdmin(req.user.role)
-      ? adminFields
-      : siteManagerFields;
-
-    allowedFields.forEach((field) => {
-      if (
-        req.body[field] !== undefined &&
-        field !== "phases" &&
-        field !== "AttributeSet" &&
-        field !== "labour" &&
-        field !== "client" &&
-        field !== "site_manager"
-      ) {
         project[field] = req.body[field];
       }
     });
 
     /* ===============================
-       AUTO PROGRESS & STATUS
+       AUTO PROGRESS & STATUS CALCULATION
     =============================== */
 
     // Recalculate progress if phases were updated
-    if (req.body.phases) {
+    if (req.body.phases !== undefined) {
       const total = project.phases.length;
       const completed = project.phases.filter((p) => p.isCompleted).length;
 
-      project.progressPercentage = total > 0 ? (completed / total) * 100 : 0;
+      project.progressPercentage = total > 0 ? Math.round((completed / total) * 100) : 0;
 
-      // Update project status based on progress
-      if (project.progressPercentage === 0) {
-        project.projectStatus = "planning";
-      } else if (project.progressPercentage === 100) {
-        project.projectStatus = "completed";
-      } else {
-        project.projectStatus = "in_progress";
+      // Update project status based on progress (only if not manually set)
+      if (req.body.projectStatus === undefined) {
+        if (project.progressPercentage === 0) {
+          project.projectStatus = "planning";
+        } else if (project.progressPercentage === 100) {
+          project.projectStatus = "completed";
+        } else if (project.progressPercentage > 0 && project.progressPercentage < 100) {
+          project.projectStatus = "in_progress";
+        }
+      }
+    }
+
+    // Validate expectedEndDate against startDate if both are present
+    if (project.startDate && project.expectedEndDate) {
+      if (new Date(project.expectedEndDate) < new Date(project.startDate)) {
+        return res.status(400).json({
+          success: false,
+          message: "Expected end date must be after start date",
+        });
       }
     }
 
     await project.save();
 
+    // ✅ Populate response
     const populatedProject = await Project.findById(project._id)
       .populate("client", "name email phoneNumber")
       .populate("site_manager", "name email phoneNumber")
@@ -527,6 +628,7 @@ export const updateProject = async (req, res) => {
       data: populatedProject,
     });
   } catch (error) {
+    console.error("Update Project Error:", error);
     return res.status(500).json({
       success: false,
       message: error.message,
