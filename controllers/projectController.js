@@ -191,7 +191,6 @@ export const createProject = async (req, res) => {
   }
 };
 
-// Enhanced getProjects with extracost breakdown
 export const getProjects = async (req, res) => {
   try {
     const {
@@ -205,7 +204,7 @@ export const getProjects = async (req, res) => {
       search,
       sortBy = "createdAt",
       sortOrder = "desc",
-      includeextracostBreakdown = "false",
+      includeBudgetBreakdown = "false", // Renamed from includeextracostBreakdown
     } = req.query;
 
     // Base filter from role
@@ -463,7 +462,7 @@ export const getProjects = async (req, res) => {
         }
       },
       
-      // Reconstruct attribute sets with populated attributes and calculate totals
+      // Reconstruct attribute sets with populated attributes
       {
         $addFields: {
           attributeSets: {
@@ -495,7 +494,7 @@ export const getProjects = async (req, res) => {
         }
       },
       
-      // Calculate totals in a separate stage to avoid $multiply issues
+      // Calculate totals for each attribute set
       {
         $addFields: {
           attributeSets: {
@@ -579,7 +578,7 @@ export const getProjects = async (req, res) => {
         }
       },
       
-      // Calculate project total
+      // Calculate project total from attribute sets
       {
         $addFields: {
           projectTotal: {
@@ -590,6 +589,18 @@ export const getProjects = async (req, res) => {
                 in: "$$set.setTotal"
               }
             }
+          }
+        }
+      },
+      
+      // Calculate final total including extracost
+      {
+        $addFields: {
+          finalProjectTotal: {
+            $add: [
+              { $ifNull: ["$projectTotal", 0] },
+              { $ifNull: ["$extracost", 0] }
+            ]
           }
         }
       },
@@ -618,6 +629,37 @@ export const getProjects = async (req, res) => {
         }
       },
       
+      // Add percentage calculations for each set
+      {
+        $addFields: {
+          attributeSets: {
+            $map: {
+              input: "$attributeSets",
+              as: "set",
+              in: {
+                $mergeObjects: [
+                  "$$set",
+                  {
+                    percentageOfTotal: {
+                      $cond: {
+                        if: { $gt: ["$projectTotal", 0] },
+                        then: {
+                          $concat: [
+                            { $toString: { $round: [{ $multiply: [{ $divide: ["$$set.setTotal", "$projectTotal"] }, 100] }, 2] } },
+                            "%"
+                          ]
+                        },
+                        else: "0%"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      },
+      
       // Clean up temporary fields
       {
         $project: {
@@ -634,72 +676,124 @@ export const getProjects = async (req, res) => {
     // Get total count for pagination
     const total = await Project.countDocuments(filter);
 
-    // Transform projects to include extracost breakdown if requested
+    // Transform projects to include budget breakdown if requested
     let transformedProjects = projects;
     
-    if (includeextracostBreakdown === "true") {
+    if (includeBudgetBreakdown === "true") {
       transformedProjects = projects.map(project => {
-        // Calculate extracost breakdown using the aggregated data
-        const totalextracost = project.extracost || 0;
-        const allocatedValue = project.projectTotal || 0;
-        
-        // Calculate phase extracost allocation (optional for list view)
-        const phaseextracostAllocation = project.phases 
-          ? calculatePhaseextracostAllocation(project.phases, totalextracost)
-          : null;
+        const projectTotal = project.projectTotal || 0;
+        const extracost = project.extracost || 0;
+        const finalProjectTotal = project.finalProjectTotal || (projectTotal + extracost);
+        const totalBudget = project.budget || 0;
 
-        // Create extracost breakdown
-        const extracostBreakdown = {
-          totalAttributesValue: allocatedValue,
-          attributeSets: project.attributeSets.map(set => ({
+        // Calculate phase budget allocation (simplified for list view)
+        const phaseWeightages = {
+          'FOUNDATION': 0.20,
+          'STRUCTURE': 0.40,
+          'FINISHING': 0.30,
+          'HANDOVER': 0.10
+        };
+
+        const phaseBudgetAllocation = (project.phases || []).map((phase, index) => {
+          const phaseName = phase.phaseName;
+          const weightage = phaseWeightages[phaseName] || 0;
+          const allocatedBudget = totalBudget * weightage;
+          
+          return {
+            phaseName: phase.phaseName,
+            completionPercentage: phase.completionPercentage || 0,
+            isCompleted: phase.isCompleted || false,
+            allocatedBudget: Math.round(allocatedBudget),
+            weightage: `${weightage * 100}%`
+          };
+        });
+
+        // Create comprehensive budget breakdown
+        const budgetBreakdown = {
+          // Main cost components
+          totalAttributesValue: projectTotal,
+          extracostValue: extracost,
+          finalTotalValue: finalProjectTotal,
+          
+          // Simplified attribute sets for list view
+          attributeSets: (project.attributeSets || []).map(set => ({
             _id: set._id,
             name: set.name,
             totalPricing: set.setTotal || 0,
             attributeCount: set.attributeCount || 0,
             validAttributes: set.validAttributes || 0,
             invalidAttributes: (set.attributeCount || 0) - (set.validAttributes || 0),
-            attributes: set.attributes.map(attr => ({
-              _id: attr.attribute?._id,
-              label: attr.attribute?.label,
-              type: attr.attribute?.type,
-              pricing: attr.attribute?.pricing,
-              quantity: attr.quantity,
-              totalPrice: attr.totalCost || 0,
-              isValid: !!attr.attribute
-            }))
+            percentageOfTotal: set.percentageOfTotal || "0%",
+            // Include top items only for list view (first 2 items)
+            topItems: (set.attributes || [])
+              .filter(attr => attr.attribute)
+              .slice(0, 2)
+              .map(attr => ({
+                label: attr.attribute?.label,
+                totalPrice: attr.totalCost || 0
+              }))
           })),
+          
+          // Summary statistics
           summary: {
             totalItems: project.totalAttributes || 0,
             totalValidItems: project.totalValidAttributes || 0,
             totalInvalidItems: (project.totalAttributes || 0) - (project.totalValidAttributes || 0),
             averagePricePerItem: project.totalValidAttributes > 0 
-              ? (allocatedValue / project.totalValidAttributes).toFixed(2) 
+              ? (projectTotal / project.totalValidAttributes).toFixed(2) 
               : "0.00"
           },
-          extracostUtilization: {
-            totalextracost,
-            allocatedValue,
-            remainingextracost: totalextracost - allocatedValue,
-            allocatedPercentage: totalextracost > 0 
-              ? ((allocatedValue / totalextracost) * 100).toFixed(2) + '%' 
+          
+          // Budget utilization
+          budgetUtilization: {
+            totalBudget,
+            allocatedValue: projectTotal,
+            extracost,
+            finalTotal: finalProjectTotal,
+            remainingBudget: totalBudget - finalProjectTotal,
+            allocatedPercentage: totalBudget > 0 
+              ? ((projectTotal / totalBudget) * 100).toFixed(2) + '%' 
               : '0%',
-            status: allocatedValue > totalextracost 
-              ? 'OVER_extracost' 
-              : allocatedValue === totalextracost 
-                ? 'FULLY_ALLOCATED' 
-                : 'WITHIN_extracost',
-            utilizationRatio: totalextracost > 0 
-              ? (allocatedValue / totalextracost).toFixed(2) 
+            finalTotalPercentage: totalBudget > 0 
+              ? ((finalProjectTotal / totalBudget) * 100).toFixed(2) + '%' 
+              : '0%',
+            status: totalBudget === 0 ? 'NO_BUDGET' :
+                    finalProjectTotal > totalBudget ? 'OVER_BUDGET' : 
+                    finalProjectTotal === totalBudget ? 'FULLY_ALLOCATED' : 
+                    'WITHIN_BUDGET',
+            utilizationRatio: totalBudget > 0 
+              ? (finalProjectTotal / totalBudget).toFixed(2) 
               : '0.00'
           }
         };
 
         return {
           ...project,
-          extracostBreakdown,
-          phaseextracostAllocation
+          // Include all totals
+          projectTotal,
+          extracost,
+          finalProjectTotal,
+          // Add breakdowns
+          budgetBreakdown,
+          phaseBudgetAllocation,
+          // Quick status indicator
+          budgetStatus: {
+            isOverBudget: finalProjectTotal > totalBudget,
+            overBudgetAmount: finalProjectTotal > totalBudget ? finalProjectTotal - totalBudget : 0,
+            budgetUtilizationPercent: totalBudget > 0 
+              ? ((finalProjectTotal / totalBudget) * 100).toFixed(2) + '%'
+              : 'N/A'
+          }
         };
       });
+    } else {
+      // Even without full breakdown, include basic totals
+      transformedProjects = projects.map(project => ({
+        ...project,
+        projectTotal: project.projectTotal || 0,
+        extracost: project.extracost || 0,
+        finalProjectTotal: (project.projectTotal || 0) + (project.extracost || 0)
+      }));
     }
 
     res.json({
@@ -792,7 +886,7 @@ export const getProjectById = async (req, res) => {
         }
       },
       
-      // First, let's get the attribute sets without unwinding to avoid array issues
+      // Get attribute sets
       {
         $lookup: {
           from: "attributesets",
@@ -802,7 +896,7 @@ export const getProjectById = async (req, res) => {
         }
       },
       
-      // Now process each attribute set using $map instead of $unwind
+      // Process each attribute set
       {
         $addFields: {
           attributeSets: {
@@ -813,7 +907,6 @@ export const getProjectById = async (req, res) => {
                 $mergeObjects: [
                   "$$set",
                   {
-                    // Process attributes for each set
                     attributes: {
                       $map: {
                         input: { $ifNull: ["$$set.attributes", []] },
@@ -837,7 +930,7 @@ export const getProjectById = async (req, res) => {
         }
       },
       
-      // Now lookup all attributes in one go
+      // Lookup all attributes
       {
         $lookup: {
           from: "attributes",
@@ -880,7 +973,7 @@ export const getProjectById = async (req, res) => {
         }
       },
       
-      // Create a map of attributes for easy lookup
+      // Create attribute map
       {
         $addFields: {
           attributeMap: {
@@ -977,7 +1070,7 @@ export const getProjectById = async (req, res) => {
         }
       },
       
-      // Calculate project total
+      // Calculate project total from attribute sets
       {
         $addFields: {
           projectTotal: {
@@ -986,7 +1079,7 @@ export const getProjectById = async (req, res) => {
         }
       },
       
-      // Add percentages
+      // Add percentages for attribute sets
       {
         $addFields: {
           attributeSets: {
@@ -1017,6 +1110,18 @@ export const getProjectById = async (req, res) => {
         }
       },
       
+      // Calculate final total including extracost
+      {
+        $addFields: {
+          finalProjectTotal: {
+            $add: [
+              { $ifNull: ["$projectTotal", 0] },
+              { $ifNull: ["$extracost", 0] }
+            ]
+          }
+        }
+      },
+      
       // Clean up temporary fields
       {
         $project: {
@@ -1043,59 +1148,161 @@ export const getProjectById = async (req, res) => {
       });
     }
 
-    // Calculate extracost breakdown using the aggregated data
-    const extracostBreakdown = calculateextracostBreakdown(project.attributeSets);
-    
-    // Calculate extracost utilization
-    const totalextracost = project.extracost || 0;
-    const allocatedValue = project.projectTotal || 0;
+    // Calculate base values
+    const projectTotal = project.projectTotal || 0;
+    const extracost = project.extracost || 0;
+    const finalProjectTotal = project.finalProjectTotal || (projectTotal + extracost);
+    const totalBudget = project.budget || 0;
 
-    // Calculate phase extracost allocation
-    const phaseextracostAllocation = calculatePhaseextracostAllocation(project.phases, totalextracost);
+    // Calculate phase weightages
+    const phaseWeightages = {
+      'FOUNDATION': 0.20,
+      'STRUCTURE': 0.40,
+      'FINISHING': 0.30,
+      'HANDOVER': 0.10
+    };
 
-    // Add calculated fields to response
+    // Build enhanced project with complete budget breakdown
     const enhancedProject = {
       ...project,
-      extracostBreakdown: {
-        totalAttributesValue: allocatedValue,
-        attributeSets: (project.attributeSets || []).map(set => ({
-          _id: set._id,
-          name: set.name,
-          totalPricing: set.setTotal || 0,
-          attributeCount: set.attributeCount || 0,
-          validAttributes: set.validAttributes || 0,
-          attributes: (set.attributes || []).map(attr => ({
+      
+      // All three totals
+      projectTotal,
+      extracost,
+      finalProjectTotal,
+      
+      // Complete budget breakdown
+      budgetBreakdown: {
+        // Main cost components
+        totalAttributesValue: projectTotal,
+        extracostValue: extracost,
+        finalTotalValue: finalProjectTotal,
+        
+        // Detailed attribute sets with items
+        attributeSets: (project.attributeSets || []).map(set => {
+          // Calculate per-set statistics
+          const setAttributes = (set.attributes || []).map(attr => ({
             _id: attr.attribute?._id,
-            label: attr.attribute?.label,
-            type: attr.attribute?.type,
-            pricing: attr.attribute?.pricing,
+            label: attr.attribute?.label || 'Unknown',
+            type: attr.attribute?.type || 'unknown',
+            unitPrice: attr.attribute?.pricing || 0,
             quantity: attr.quantity || 1,
             totalPrice: (attr.attribute?.pricing || 0) * (attr.quantity || 1),
-            unitPrice: attr.attribute?.pricing || 0,
             isValid: !!attr.attribute
-          })),
-          percentageOfTotal: set.percentageOfTotal || "0%"
-        })),
+          }));
+
+          return {
+            _id: set._id,
+            name: set.name,
+            totalPricing: set.setTotal || 0,
+            attributeCount: set.attributeCount || 0,
+            validAttributes: set.validAttributes || 0,
+            attributes: setAttributes,
+            percentageOfTotal: projectTotal > 0 
+              ? (((set.setTotal || 0) / projectTotal) * 100).toFixed(2) + '%' 
+              : "0%"
+          };
+        }),
+        
+        // Summary statistics
         summary: {
-          totalItems: (project.attributeSets || []).reduce((acc, set) => acc + (set.attributeCount || 0), 0),
-          totalValidItems: (project.attributeSets || []).reduce((acc, set) => acc + (set.validAttributes || 0), 0),
-          totalInvalidItems: (project.attributeSets || []).reduce((acc, set) => acc + ((set.attributeCount || 0) - (set.validAttributes || 0)), 0),
-          averagePricePerItem: (project.attributeSets || []).reduce((acc, set) => acc + (set.attributeCount || 0), 0) > 0 
-            ? (allocatedValue / (project.attributeSets || []).reduce((acc, set) => acc + (set.attributeCount || 0), 0)).toFixed(2) 
+          totalItems: (project.attributeSets || []).reduce((acc, set) => 
+            acc + (set.attributeCount || 0), 0),
+          totalValidItems: (project.attributeSets || []).reduce((acc, set) => 
+            acc + (set.validAttributes || 0), 0),
+          totalInvalidItems: (project.attributeSets || []).reduce((acc, set) => 
+            acc + ((set.attributeCount || 0) - (set.validAttributes || 0)), 0),
+          averagePricePerItem: (project.attributeSets || []).reduce((acc, set) => 
+            acc + (set.attributeCount || 0), 0) > 0 
+            ? (projectTotal / (project.attributeSets || []).reduce((acc, set) => 
+                acc + (set.attributeCount || 0), 0)).toFixed(2) 
             : "0.00"
         },
-        extracostUtilization: {
-          totalextracost,
-          allocatedValue,
-          remainingextracost: totalextracost - allocatedValue,
-          allocatedPercentage: totalextracost > 0 ? ((allocatedValue / totalextracost) * 100).toFixed(2) + '%' : '0%',
-          status: allocatedValue > totalextracost ? 'OVER_extracost' : 
-                  allocatedValue === totalextracost ? 'FULLY_ALLOCATED' : 'WITHIN_extracost',
-          utilizationRatio: totalextracost > 0 ? (allocatedValue / totalextracost).toFixed(2) : '0.00'
+        
+        // Budget utilization against project budget
+        budgetUtilization: {
+          totalBudget,
+          allocatedValue: projectTotal,
+          extracost,
+          finalTotal: finalProjectTotal,
+          remainingBudget: totalBudget - finalProjectTotal,
+          allocatedPercentage: totalBudget > 0 
+            ? ((projectTotal / totalBudget) * 100).toFixed(2) + '%' 
+            : '0%',
+          finalTotalPercentage: totalBudget > 0 
+            ? ((finalProjectTotal / totalBudget) * 100).toFixed(2) + '%' 
+            : '0%',
+          status: totalBudget === 0 ? 'NO_BUDGET' :
+                  finalProjectTotal > totalBudget ? 'OVER_BUDGET' : 
+                  finalProjectTotal === totalBudget ? 'FULLY_ALLOCATED' : 
+                  'WITHIN_BUDGET',
+          utilizationRatio: totalBudget > 0 
+            ? (finalProjectTotal / totalBudget).toFixed(2) 
+            : '0.00'
         }
       },
-      phaseextracostAllocation
+      
+      // Phase budget allocation
+      phaseBudgetAllocation: (project.phases || []).map((phase, index) => {
+        const phaseName = phase.phaseName;
+        const weightage = phaseWeightages[phaseName] || 0;
+        const allocatedBudget = totalBudget * weightage;
+        
+        // Calculate spent budget based on completion
+        let spentBudget = 0;
+        if (phase.isCompleted) {
+          spentBudget = allocatedBudget; // Full allocation if completed
+        } else if (phase.completionPercentage > 0) {
+          spentBudget = (allocatedBudget * phase.completionPercentage) / 100;
+        }
+
+        return {
+          phaseName: phase.phaseName,
+          completionPercentage: phase.completionPercentage || 0,
+          isCompleted: phase.isCompleted || false,
+          allocatedBudget: Math.round(allocatedBudget),
+          spentBudget: Math.round(spentBudget),
+          remainingBudget: Math.round(allocatedBudget - spentBudget),
+          weightage: `${weightage * 100}%`,
+          // Show if phase costs are within allocation
+          isOverBudget: spentBudget > allocatedBudget
+        };
+      }),
+      
+      // Additional financial metrics
+      financialMetrics: {
+        // Cost breakdown by type
+        costByType: (project.attributeSets || []).reduce((acc, set) => {
+          (set.attributes || []).forEach(attr => {
+            if (attr.attribute?.type) {
+              const type = attr.attribute.type;
+              const amount = (attr.attribute.pricing || 0) * (attr.quantity || 1);
+              acc[type] = (acc[type] || 0) + amount;
+            }
+          });
+          return acc;
+        }, {}),
+        
+        // ROI and efficiency metrics (if applicable)
+        costPerPhase: totalBudget > 0 && project.phases 
+          ? (finalProjectTotal / project.phases.length).toFixed(2)
+          : '0.00',
+        
+        // Budget efficiency
+        budgetEfficiency: totalBudget > 0 && finalProjectTotal > 0
+          ? ((finalProjectTotal / totalBudget) * 100).toFixed(2) + '%'
+          : '0%'
+      }
     };
+
+    // Log for debugging (optional)
+    console.log('Budget Breakdown Summary:', {
+      projectTotal: enhancedProject.projectTotal,
+      extracost: enhancedProject.extracost,
+      finalTotal: enhancedProject.finalProjectTotal,
+      budget: enhancedProject.budget,
+      status: enhancedProject.budgetBreakdown.budgetUtilization.status
+    });
 
     res.json({
       success: true,
