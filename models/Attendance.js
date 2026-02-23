@@ -1,20 +1,36 @@
 import mongoose from "mongoose";
 
-const attendanceLocationSchema = new mongoose.Schema(
+const historySchema = new mongoose.Schema(
   {
-    type: {
+    attendanceType: {
       type: String,
-      enum: ["Point"],
-      default: "Point",
+      enum: ["check-in", "check-out"],
       required: true,
     },
-    coordinates: {
-      type: [Number],
+
+    selfieImage: {
+      type: String,
       required: true,
-      index: "2dsphere",
+    },
+
+    location: {
+      type: {
+        type: String,
+        enum: ["Point"],
+        default: "Point",
+      },
+      coordinates: {
+        type: [Number], // [longitude, latitude]
+        required: true,
+      },
+    },
+
+    createdAt: {
+      type: Date,
+      default: Date.now,
     },
   },
-  { _id: false },
+  { _id: false }
 );
 
 const attendanceSchema = new mongoose.Schema(
@@ -31,46 +47,13 @@ const attendanceSchema = new mongoose.Schema(
       required: true,
     },
 
-    selfieImage: {
-      type: String,
-      required: true,
-    },
-
-    location: {
-      type: attendanceLocationSchema,
-      required: true,
-    },
-
-    attendanceType: {
-      type: String,
-      enum: ["check_in", "check_out"],
-      required: true,
-    },
-
-    attendanceDate: {
-      type: Date,
-      default: () => new Date(),
-      index: true,
-    },
-
-    status: {
-      type: String,
-      enum: ["present", "rejected"],
-      default: "present",
-    },
-
-    rejectionReason: {
-      type: String,
-    },
+    history: [historySchema],
   },
-  {
-    timestamps: true,
-  },
+  { timestamps: true }
 );
 
-attendanceSchema.index(
-  { user: 1, project: 1, attendanceDate: 1, attendanceType: 1 },
-  { unique: true },
-);
+// Optional but useful
+attendanceSchema.index({ "history.location": "2dsphere" });
 
-export default mongoose.model("Attendance", attendanceSchema);
+const Attendance = mongoose.model("Attendance", attendanceSchema);
+export default Attendance;

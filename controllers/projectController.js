@@ -42,8 +42,6 @@ export const createProject = async (req, res) => {
     if (
       !projectName ||
       !siteName ||
-      !startDate ||
-      extracost === undefined ||
       !area
     ) {
       return res.status(400).json({
