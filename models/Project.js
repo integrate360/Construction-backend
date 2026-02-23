@@ -69,15 +69,15 @@ const projectSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
-
-    location: locationSchema,
-
-    area: {
+     area: {
       type: Number,
       required: true,
       min: 0,
-      description: "Area in square meters/feet",
+      description: "Area in square feet/meters",
     },
+
+
+    location: locationSchema,
 
     client: {
       type: mongoose.Schema.Types.ObjectId,
@@ -105,6 +105,19 @@ const projectSchema = new mongoose.Schema(
         type: mongoose.Schema.Types.ObjectId,
         ref: "AttributeSet",
         required: true,
+      },
+    ],
+    attributes: [
+      {
+        attribute: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "Attribute",
+        },
+        quantity: {
+          type: Number,
+          min: 1,
+          default: 1,
+        },
       },
     ],
 

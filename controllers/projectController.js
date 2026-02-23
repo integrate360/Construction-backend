@@ -1,6 +1,7 @@
 import Project from "../models/Project.js";
 import User from "../models/User.js";
 import AttributeSet from "../models/AttributeSet.js";
+import Attribute from "../models/Attribute.js";
 import mongoose from "mongoose";
 import {
   isAdmin,
@@ -24,11 +25,12 @@ export const createProject = async (req, res) => {
       projectName,
       siteName,
       location,
-      area, // Added area field
-      client, // optional
-      labour, // optional
-      site_manager, // optional
+      area,
+      client,
+      labour,
+      site_manager,
       AttributeSet: attributeSetIds,
+      attributes, 
       startDate,
       expectedEndDate,
       extracost,
@@ -41,14 +43,13 @@ export const createProject = async (req, res) => {
       !projectName ||
       !siteName ||
       !startDate ||
-      !extracost ||
-      !attributeSetIds ||
-      !area // Added area as required field
+      extracost === undefined ||
+      !area
     ) {
       return res.status(400).json({
         success: false,
         message:
-          "Missing required fields: projectName, siteName, startDate, extracost, area, and AttributeSet are required",
+          "Missing required fields: projectName, siteName, startDate, extracost, and area are required",
       });
     }
 
@@ -57,6 +58,14 @@ export const createProject = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "Area cannot be negative",
+      });
+    }
+
+    // ✅ Validate extracost
+    if (extracost < 0) {
+      return res.status(400).json({
+        success: false,
+        message: "extracost cannot be negative",
       });
     }
 
@@ -112,21 +121,56 @@ export const createProject = async (req, res) => {
       }
     }
 
-    // ✅ Normalize AttributeSet to array
-    const attributeSetArray = Array.isArray(attributeSetIds)
-      ? attributeSetIds
-      : [attributeSetIds];
+    // ✅ Validate AttributeSet if provided
+    let attributeSetArray = [];
+    if (attributeSetIds) {
+      attributeSetArray = Array.isArray(attributeSetIds)
+        ? attributeSetIds
+        : [attributeSetIds];
 
-    // ✅ Validate AttributeSet existence
-    const attributeSetCount = await AttributeSet.countDocuments({
-      _id: { $in: attributeSetArray },
-    });
-
-    if (attributeSetCount !== attributeSetArray.length) {
-      return res.status(404).json({
-        success: false,
-        message: "One or more AttributeSets not found",
+      const attributeSetCount = await AttributeSet.countDocuments({
+        _id: { $in: attributeSetArray },
       });
+
+      if (attributeSetCount !== attributeSetArray.length) {
+        return res.status(404).json({
+          success: false,
+          message: "One or more AttributeSets not found",
+        });
+      }
+    }
+
+    // ✅ Validate direct attributes if provided
+    let validatedAttributes = [];
+    if (attributes && attributes.length > 0) {
+      for (const item of attributes) {
+        if (!item.attribute || !item.quantity) {
+          return res.status(400).json({
+            success: false,
+            message: "Each attribute must have attribute ID and quantity",
+          });
+        }
+
+        if (item.quantity < 1) {
+          return res.status(400).json({
+            success: false,
+            message: "Quantity must be at least 1",
+          });
+        }
+
+        const attributeExists = await Attribute.findById(item.attribute);
+        if (!attributeExists) {
+          return res.status(404).json({
+            success: false,
+            message: `Attribute with ID ${item.attribute} not found`,
+          });
+        }
+
+        validatedAttributes.push({
+          attribute: item.attribute,
+          quantity: item.quantity,
+        });
+      }
     }
 
     // ✅ Validate phases if provided
@@ -160,17 +204,26 @@ export const createProject = async (req, res) => {
       projectStatus = "completed";
     }
 
+    // ✅ Validate expectedEndDate against startDate
+    if (expectedEndDate && new Date(expectedEndDate) < new Date(startDate)) {
+      return res.status(400).json({
+        success: false,
+        message: "Expected end date must be after start date",
+      });
+    }
+
     // ✅ Create project
     const project = await Project.create({
       projectName,
       siteName,
       location,
-      area, // Added area field
+      area,
       client: client || null,
       labour: labour || [],
       site_manager: site_manager || null,
       createdBy: req.user._id,
       AttributeSet: attributeSetArray,
+      attributes: validatedAttributes,
       startDate,
       expectedEndDate,
       extracost,
@@ -186,7 +239,12 @@ export const createProject = async (req, res) => {
       .populate("site_manager", "name email phoneNumber")
       .populate("labour", "name email phoneNumber")
       .populate("createdBy", "name email")
-      .populate("AttributeSet");
+      .populate("AttributeSet")
+      .populate({
+        path: "attributes.attribute",
+        model: "Attribute",
+        select: "label type unit pricing",
+      });
 
     return res.status(201).json({
       success: true,
@@ -214,7 +272,6 @@ export const getProjects = async (req, res) => {
       search,
       sortBy = "createdAt",
       sortOrder = "desc",
-      includeBudgetBreakdown = "false",
     } = req.query;
 
     const filter = buildRoleFilter(req.user);
@@ -224,10 +281,11 @@ export const getProjects = async (req, res) => {
 
     if (isAdmin(req.user.role)) {
       if (client) filter.client = new mongoose.Types.ObjectId(client);
-      if (site_manager) filter.site_manager = new mongoose.Types.ObjectId(site_manager);
+      if (site_manager)
+        filter.site_manager = new mongoose.Types.ObjectId(site_manager);
       if (labour) {
         const labourIds = Array.isArray(labour)
-          ? labour.map(id => new mongoose.Types.ObjectId(id))
+          ? labour.map((id) => new mongoose.Types.ObjectId(id))
           : [new mongoose.Types.ObjectId(labour)];
         filter.labour = { $in: labourIds };
       }
@@ -254,101 +312,111 @@ export const getProjects = async (req, res) => {
       { $limit: Number(limit) },
 
       // -------- USERS LOOKUPS --------
-      { $lookup: { from: "users", localField: "client", foreignField: "_id", as: "client" } },
-      { $unwind: { path: "$client", preserveNullAndEmptyArrays: true } },
+      {
+        $lookup: {
+          from: "users",
+          localField: "client",
+          foreignField: "_id",
+          as: "client",
+        },
+      },
+      {
+        $unwind: {
+          path: "$client",
+          preserveNullAndEmptyArrays: true,
+        },
+      },
 
-      { $lookup: { from: "users", localField: "site_manager", foreignField: "_id", as: "site_manager" } },
-      { $unwind: { path: "$site_manager", preserveNullAndEmptyArrays: true } },
+      {
+        $lookup: {
+          from: "users",
+          localField: "site_manager",
+          foreignField: "_id",
+          as: "site_manager",
+        },
+      },
+      {
+        $unwind: {
+          path: "$site_manager",
+          preserveNullAndEmptyArrays: true,
+        },
+      },
 
-      { $lookup: { from: "users", localField: "labour", foreignField: "_id", as: "labour" } },
+      {
+        $lookup: {
+          from: "users",
+          localField: "labour",
+          foreignField: "_id",
+          as: "labour",
+        },
+      },
 
-      // -------- ATTRIBUTE SETS --------
+      {
+        $lookup: {
+          from: "users",
+          localField: "createdBy",
+          foreignField: "_id",
+          as: "createdBy",
+        },
+      },
+      {
+        $unwind: {
+          path: "$createdBy",
+          preserveNullAndEmptyArrays: true,
+        },
+      },
+
+      // -------- ATTRIBUTE SETS with populated attributes --------
       {
         $lookup: {
           from: "attributesets",
           localField: "AttributeSet",
           foreignField: "_id",
           as: "attributeSets",
-        },
-      },
-
-      {
-        $addFields: {
-          attributeSets: {
-            $map: {
-              input: { $ifNull: ["$attributeSets", []] },
-              as: "set",
-              in: {
-                _id: "$$set._id",
-                name: "$$set.name",
-                attributes: {
-                  $map: {
-                    input: { $ifNull: ["$$set.attributes", []] },
-                    as: "attr",
-                    in: {
-                      _id: "$$attr._id",
-                      attributeId: "$$attr.attribute",
-                      attributeKey: {
-                        $cond: {
-                          if: { $ne: ["$$attr.attribute", null] },
-                          then: { $toString: "$$attr.attribute" },
-                          else: null,
-                        },
-                      },
-                    },
-                  },
-                },
-              },
+          pipeline: [
+            {
+              $lookup: {
+                from: "attributes",
+                localField: "attributes",
+                foreignField: "_id",
+                as: "populatedAttributes",
+              }
             },
-          },
-        },
-      },
-
-      {
-        $addFields: {
-          allAttributeIds: {
-            $reduce: {
-              input: "$attributeSets",
-              initialValue: [],
-              in: {
-                $concatArrays: [
-                  "$$value",
-                  {
-                    $map: {
-                      input: "$$this.attributes",
-                      as: "a",
-                      in: "$$a.attributeId",
-                    },
-                  },
-                ],
-              },
+            {
+              $addFields: {
+                attributes: "$populatedAttributes"
+              }
             },
-          },
+            {
+              $project: {
+                populatedAttributes: 0
+              }
+            }
+          ]
         },
       },
 
+      // -------- DIRECT ATTRIBUTES --------
       {
         $lookup: {
           from: "attributes",
-          let: { ids: "$allAttributeIds" },
-          pipeline: [
-            { $match: { $expr: { $in: ["$_id", "$$ids"] } } },
-            { $project: { label: 1, pricing: 1 } },
-          ],
-          as: "allAttributes",
+          localField: "attributes.attribute",
+          foreignField: "_id",
+          as: "directAttributeDetails",
         },
       },
 
+      // Create a map of direct attributes for easy access
       {
         $addFields: {
-          attributeMap: {
+          directAttributeMap: {
             $arrayToObject: {
               $map: {
-                input: "$allAttributes",
-                as: "a",
+                input: "$directAttributeDetails",
+                as: "attr",
                 in: {
-                  k: { $toString: "$$a._id" },
-                  v: "$$a",
+                  k: { $toString: "$$attr._id" },
+                  v: "$$attr",
                 },
               },
             },
@@ -356,6 +424,33 @@ export const getProjects = async (req, res) => {
         },
       },
 
+      // Enrich direct attributes with full details
+      {
+        $addFields: {
+          attributes: {
+            $map: {
+              input: "$attributes",
+              as: "item",
+              in: {
+                attribute: {
+                  $mergeObjects: [
+                    { _id: "$$item.attribute" },
+                    {
+                      $getField: {
+                        field: { $toString: "$$item.attribute" },
+                        input: "$directAttributeMap",
+                      },
+                    },
+                  ],
+                },
+                quantity: "$$item.quantity",
+              },
+            },
+          },
+        },
+      },
+
+      // Calculate totals from attribute sets
       {
         $addFields: {
           attributeSets: {
@@ -365,24 +460,16 @@ export const getProjects = async (req, res) => {
               in: {
                 _id: "$$set._id",
                 name: "$$set.name",
-                attributes: {
-                  $map: {
-                    input: "$$set.attributes",
-                    as: "attr",
-                    in: {
-                      attributeId: "$$attr.attributeId",
-                      attribute: {
-                        $cond: {
-                          if: { $ne: ["$$attr.attributeKey", null] },
-                          then: {
-                            $getField: {
-                              field: "$$attr.attributeKey",
-                              input: "$attributeMap",
-                            },
-                          },
-                          else: null,
-                        },
-                      },
+                attributes: "$$set.attributes",
+                createdBy: "$$set.createdBy",
+                createdAt: "$$set.createdAt",
+                updatedAt: "$$set.updatedAt",
+                setTotal: {
+                  $sum: {
+                    $map: {
+                      input: { $ifNull: ["$$set.attributes", []] },
+                      as: "attr",
+                      in: { $ifNull: ["$$attr.pricing", 0] },
                     },
                   },
                 },
@@ -392,37 +479,63 @@ export const getProjects = async (req, res) => {
         },
       },
 
+      // Calculate total from attribute sets
+      {
+        $addFields: {
+          attributeSetTotal: {
+            $sum: "$attributeSets.setTotal",
+          },
+        },
+      },
+
+      // Calculate total from direct attributes with quantities
+      {
+        $addFields: {
+          directAttributesTotal: {
+            $sum: {
+              $map: {
+                input: "$attributes",
+                as: "item",
+                in: {
+                  $multiply: [
+                    { $ifNull: ["$$item.quantity", 1] },
+                    { $ifNull: ["$$item.attribute.pricing", 0] },
+                  ],
+                },
+              },
+            },
+          },
+        },
+      },
+
+      // Calculate final totals
       {
         $addFields: {
           projectTotal: {
-            $sum: {
-              $map: {
-                input: "$attributeSets",
-                as: "set",
-                in: {
-                  $sum: {
-                    $map: {
-                      input: "$$set.attributes",
-                      as: "a",
-                      in: { $ifNull: ["$$a.attribute.pricing", 0] },
-                    },
-                  },
-                },
-              },
-            },
+            $add: [
+              { $ifNull: ["$attributeSetTotal", 0] },
+              { $ifNull: ["$directAttributesTotal", 0] },
+            ],
           },
-        },
-      },
-
-      {
-        $addFields: {
           finalProjectTotal: {
-            $add: [{ $ifNull: ["$projectTotal", 0] }, { $ifNull: ["$extracost", 0] }],
+            $add: [
+              { $ifNull: ["$attributeSetTotal", 0] },
+              { $ifNull: ["$directAttributesTotal", 0] },
+              { $ifNull: ["$extracost", 0] },
+            ],
           },
         },
       },
 
-      { $project: { allAttributes: 0, attributeMap: 0, allAttributeIds: 0 } },
+      // Clean up temporary fields
+      {
+        $project: {
+          directAttributeDetails: 0,
+          directAttributeMap: 0,
+          attributeSetTotal: 0,
+          directAttributesTotal: 0,
+        },
+      },
     ];
 
     const projects = await Project.aggregate(pipeline);
@@ -446,11 +559,19 @@ export const getProjects = async (req, res) => {
 
 export const getProjectById = async (req, res) => {
   try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid project ID",
+      });
+    }
+
     const projectId = new mongoose.Types.ObjectId(req.params.id);
 
     const pipeline = [
       { $match: { _id: projectId } },
 
+      // User lookups
       {
         $lookup: {
           from: "users",
@@ -474,6 +595,15 @@ export const getProjectById = async (req, res) => {
       {
         $lookup: {
           from: "users",
+          localField: "labour",
+          foreignField: "_id",
+          as: "labour",
+        },
+      },
+
+      {
+        $lookup: {
+          from: "users",
           localField: "createdBy",
           foreignField: "_id",
           as: "createdBy",
@@ -481,43 +611,62 @@ export const getProjectById = async (req, res) => {
       },
       { $unwind: { path: "$createdBy", preserveNullAndEmptyArrays: true } },
 
-      /* ---------------- ATTRIBUTE SETS ---------------- */
-
+      // Attribute Sets lookup with populated attributes
       {
         $lookup: {
           from: "attributesets",
           localField: "AttributeSet",
           foreignField: "_id",
           as: "attributeSets",
+          pipeline: [
+            {
+              $lookup: {
+                from: "attributes",
+                localField: "attributes",
+                foreignField: "_id",
+                as: "populatedAttributes",
+              }
+            },
+            {
+              $addFields: {
+                attributes: "$populatedAttributes"
+              }
+            },
+            {
+              $project: {
+                populatedAttributes: 0
+              }
+            }
+          ]
         },
       },
 
-      /* Normalize attributes safely */
+      // Direct attributes lookup with pricing
+      {
+        $lookup: {
+          from: "attributes",
+          localField: "attributes.attribute",
+          foreignField: "_id",
+          as: "directAttributeDetails",
+        },
+      },
+
+      // Create map for direct attributes with pricing
       {
         $addFields: {
-          attributeSets: {
-            $map: {
-              input: { $ifNull: ["$attributeSets", []] },
-              as: "set",
-              in: {
-                _id: "$$set._id",
-                name: "$$set.name",
-                createdBy: "$$set.createdBy",
-                createdAt: "$$set.createdAt",
-                updatedAt: "$$set.updatedAt",
-                attributes: {
-                  $map: {
-                    input: { $ifNull: ["$$set.attributes", []] },
-                    as: "attr",
-                    in: {
-                      attributeId: {
-                        $cond: [
-                          { $eq: [{ $type: "$$attr" }, "objectId"] },
-                          "$$attr",
-                          "$$attr.attribute",
-                        ],
-                      },
-                    },
+          directAttributeMap: {
+            $arrayToObject: {
+              $map: {
+                input: "$directAttributeDetails",
+                as: "attr",
+                in: {
+                  k: { $toString: "$$attr._id" },
+                  v: {
+                    _id: "$$attr._id",
+                    label: "$$attr.label",
+                    type: "$$attr.type",
+                    pricing: "$$attr.pricing",
+                    unit: "$$attr.unit"
                   },
                 },
               },
@@ -526,93 +675,33 @@ export const getProjectById = async (req, res) => {
         },
       },
 
-      /* ---------------- ATTRIBUTES ---------------- */
-
+      // Enrich direct attributes with details
       {
-        $lookup: {
-          from: "attributes",
-          let: {
-            attrIds: {
-              $reduce: {
-                input: "$attributeSets",
-                initialValue: [],
-                in: {
-                  $concatArrays: [
-                    "$$value",
+        $addFields: {
+          enrichedAttributes: {
+            $map: {
+              input: "$attributes",
+              as: "item",
+              in: {
+                attribute: {
+                  $mergeObjects: [
+                    { _id: "$$item.attribute" },
                     {
-                      $map: {
-                        input: "$$this.attributes",
-                        as: "a",
-                        in: "$$a.attributeId",
+                      $getField: {
+                        field: { $toString: "$$item.attribute" },
+                        input: "$directAttributeMap",
                       },
                     },
                   ],
                 },
-              },
-            },
-          },
-          pipeline: [
-            { $match: { $expr: { $in: ["$_id", "$$attrIds"] } } },
-            { $project: { label: 1, type: 1, pricing: 1 } },
-          ],
-          as: "allAttributes",
-        },
-      },
-
-      {
-        $addFields: {
-          attributeMap: {
-            $arrayToObject: {
-              $map: {
-                input: "$allAttributes",
-                as: "a",
-                in: {
-                  k: { $toString: "$$a._id" },
-                  v: "$$a",
-                },
+                quantity: "$$item.quantity",
               },
             },
           },
         },
       },
 
-      /* Populate attributes safely */
-      {
-        $addFields: {
-          attributeSets: {
-            $map: {
-              input: "$attributeSets",
-              as: "set",
-              in: {
-                _id: "$$set._id",
-                name: "$$set.name",
-                attributes: {
-                  $map: {
-                    input: "$$set.attributes",
-                    as: "a",
-                    in: {
-                      attribute: {
-                        $ifNull: [
-                          {
-                            $getField: {
-                              field: { $toString: "$$a.attributeId" },
-                              input: "$attributeMap",
-                            },
-                          },
-                          null,
-                        ],
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-
-      /* ---------------- TOTALS ---------------- */
-
+      // Calculate totals from attribute sets
       {
         $addFields: {
           attributeSets: {
@@ -623,12 +712,15 @@ export const getProjectById = async (req, res) => {
                 _id: "$$set._id",
                 name: "$$set.name",
                 attributes: "$$set.attributes",
+                createdBy: "$$set.createdBy",
+                createdAt: "$$set.createdAt",
+                updatedAt: "$$set.updatedAt",
                 setTotal: {
                   $sum: {
                     $map: {
-                      input: "$$set.attributes",
-                      as: "a",
-                      in: { $ifNull: ["$$a.attribute.pricing", 0] },
+                      input: { $ifNull: ["$$set.attributes", []] },
+                      as: "attr",
+                      in: { $ifNull: ["$$attr.pricing", 0] },
                     },
                   },
                 },
@@ -638,19 +730,71 @@ export const getProjectById = async (req, res) => {
         },
       },
 
+      // Calculate totals correctly
       {
         $addFields: {
-          projectTotal: { $sum: "$attributeSets.setTotal" },
+          // Total from attribute sets
+          attributeSetTotal: {
+            $sum: "$attributeSets.setTotal",
+          },
+          
+          // Total from direct attributes with quantities
+          directAttributesTotal: {
+            $sum: {
+              $map: {
+                input: "$enrichedAttributes",
+                as: "item",
+                in: {
+                  $multiply: [
+                    { $ifNull: ["$$item.quantity", 1] },
+                    { $ifNull: ["$$item.attribute.pricing", 0] }
+                  ]
+                }
+              }
+            }
+          },
+        },
+      },
+
+      {
+        $addFields: {
+          // Project total from attributes (sets + direct with quantities)
+          projectTotal: {
+            $add: [
+              { $ifNull: ["$attributeSetTotal", 0] },
+              { $ifNull: ["$directAttributesTotal", 0] },
+            ],
+          },
+          
+          // Final project total including extracost
           finalProjectTotal: {
             $add: [
-              { $ifNull: [{ $sum: "$attributeSets.setTotal" }, 0] },
+              { $ifNull: ["$attributeSetTotal", 0] },
+              { $ifNull: ["$directAttributesTotal", 0] },
               { $ifNull: ["$extracost", 0] },
             ],
           },
         },
       },
 
-      { $project: { attributeMap: 0, allAttributes: 0 } },
+      // Replace attributes with enriched version
+      {
+        $addFields: {
+          attributes: "$enrichedAttributes"
+        }
+      },
+
+      // Clean up temporary fields
+      {
+        $project: {
+          directAttributeDetails: 0,
+          directAttributeMap: 0,
+          attributeSetTotal: 0,
+          directAttributesTotal: 0,
+          enrichedAttributes: 0,
+          "attributeSets.populatedAttributes": 0,
+        },
+      },
     ];
 
     const [project] = await Project.aggregate(pipeline);
@@ -662,6 +806,7 @@ export const getProjectById = async (req, res) => {
       });
     }
 
+    // Check access
     if (!canAccessProject(req.user, project)) {
       return res.status(403).json({
         success: false,
@@ -829,10 +974,54 @@ export const updateProject = async (req, res) => {
         }
         project.AttributeSet = attributeSetIds;
       } else {
-        return res.status(400).json({
+        project.AttributeSet = [];
+      }
+    }
+
+    // ✅ Direct attributes validation
+    if (req.body.attributes !== undefined) {
+      if (!isAdmin(req.user.role)) {
+        return res.status(403).json({
           success: false,
-          message: "AttributeSet cannot be empty",
+          message: "Only admins can update attributes",
         });
+      }
+
+      if (req.body.attributes && req.body.attributes.length > 0) {
+        const validatedAttributes = [];
+
+        for (const item of req.body.attributes) {
+          if (!item.attribute || !item.quantity) {
+            return res.status(400).json({
+              success: false,
+              message: "Each attribute must have attribute ID and quantity",
+            });
+          }
+
+          if (item.quantity < 1) {
+            return res.status(400).json({
+              success: false,
+              message: "Quantity must be at least 1",
+            });
+          }
+
+          const attributeExists = await Attribute.findById(item.attribute);
+          if (!attributeExists) {
+            return res.status(404).json({
+              success: false,
+              message: `Attribute with ID ${item.attribute} not found`,
+            });
+          }
+
+          validatedAttributes.push({
+            attribute: item.attribute,
+            quantity: item.quantity,
+          });
+        }
+
+        project.attributes = validatedAttributes;
+      } else {
+        project.attributes = [];
       }
     }
 
@@ -842,7 +1031,7 @@ export const updateProject = async (req, res) => {
         const validPhases = req.body.phases.every((phase) =>
           ["FOUNDATION", "STRUCTURE", "FINISHING", "HANDOVER"].includes(
             phase.phaseName,
-          )
+          ),
         );
 
         if (!validPhases) {
@@ -857,7 +1046,7 @@ export const updateProject = async (req, res) => {
         const phasesValid = req.body.phases.every(
           (phase) =>
             phase.hasOwnProperty("completionPercentage") &&
-            phase.hasOwnProperty("isCompleted")
+            phase.hasOwnProperty("isCompleted"),
         );
 
         if (!phasesValid) {
@@ -879,7 +1068,7 @@ export const updateProject = async (req, res) => {
       if (req.body.documents && req.body.documents.length > 0) {
         // Validate each document has required fields
         const documentsValid = req.body.documents.every(
-          (doc) => doc.name && doc.url
+          (doc) => doc.name && doc.url,
         );
 
         if (!documentsValid) {
@@ -898,7 +1087,10 @@ export const updateProject = async (req, res) => {
     if (req.body.location !== undefined) {
       if (req.body.location) {
         // Validate coordinates if provided
-        if (req.body.location.coordinates && req.body.location.coordinates.coordinates) {
+        if (
+          req.body.location.coordinates &&
+          req.body.location.coordinates.coordinates
+        ) {
           const coords = req.body.location.coordinates.coordinates;
           if (!Array.isArray(coords) || coords.length !== 2) {
             return res.status(400).json({
@@ -917,11 +1109,11 @@ export const updateProject = async (req, res) => {
        FIELD UPDATES (COMMON FIELDS)
     =============================== */
 
-    // Update basic fields (accessible by both admin and site manager)
+    // Update basic fields
     const basicFields = [
       "projectName",
       "siteName",
-      "area", // Added area field
+      "area",
       "startDate",
       "expectedEndDate",
       "extracost",
@@ -929,19 +1121,22 @@ export const updateProject = async (req, res) => {
       "approvalStatus",
     ];
 
-    basicFields.forEach((field) => {
+    for (const field of basicFields) {
       if (req.body[field] !== undefined) {
         // Special validation for dates
         if (field === "expectedEndDate" && req.body.expectedEndDate) {
           const startDate = req.body.startDate || project.startDate;
-          if (startDate && new Date(req.body.expectedEndDate) < new Date(startDate)) {
+          if (
+            startDate &&
+            new Date(req.body.expectedEndDate) < new Date(startDate)
+          ) {
             return res.status(400).json({
               success: false,
               message: "End date must be after start date",
             });
           }
         }
-        
+
         // Validation for area
         if (field === "area" && req.body.area < 0) {
           return res.status(400).json({
@@ -960,7 +1155,7 @@ export const updateProject = async (req, res) => {
 
         project[field] = req.body[field];
       }
-    });
+    }
 
     /* ===============================
        AUTO PROGRESS & STATUS CALCULATION
@@ -971,7 +1166,8 @@ export const updateProject = async (req, res) => {
       const total = project.phases.length;
       const completed = project.phases.filter((p) => p.isCompleted).length;
 
-      project.progressPercentage = total > 0 ? Math.round((completed / total) * 100) : 0;
+      project.progressPercentage =
+        total > 0 ? Math.round((completed / total) * 100) : 0;
 
       // Update project status based on progress (only if not manually set)
       if (req.body.projectStatus === undefined) {
@@ -979,7 +1175,10 @@ export const updateProject = async (req, res) => {
           project.projectStatus = "planning";
         } else if (project.progressPercentage === 100) {
           project.projectStatus = "completed";
-        } else if (project.progressPercentage > 0 && project.progressPercentage < 100) {
+        } else if (
+          project.progressPercentage > 0 &&
+          project.progressPercentage < 100
+        ) {
           project.projectStatus = "in_progress";
         }
       }
@@ -996,14 +1195,18 @@ export const updateProject = async (req, res) => {
     }
 
     await project.save();
+
+    // Populate response
     const populatedProject = await Project.findById(project._id)
       .populate("client", "name email phoneNumber")
       .populate("site_manager", "name email phoneNumber")
       .populate("labour", "name email phoneNumber")
       .populate("createdBy", "name email")
+      .populate("AttributeSet")
       .populate({
-        path: "AttributeSet",
-        populate: { path: "attributes" },
+        path: "attributes.attribute",
+        model: "Attribute",
+        select: "label type unit pricing",
       });
 
     return res.json({
@@ -1074,7 +1277,7 @@ export const getProjectStats = async (req, res) => {
     const stats = await Project.aggregate([
       { $match: matchStage },
 
-      // -------- ATTRIBUTE SETS --------
+      // Attribute Sets lookup
       {
         $lookup: {
           from: "attributesets",
@@ -1084,114 +1287,74 @@ export const getProjectStats = async (req, res) => {
         },
       },
 
-      // Flatten attributes
-      {
-        $addFields: {
-          allAttributes: {
-            $reduce: {
-              input: { $ifNull: ["$attributeSets", []] },
-              initialValue: [],
-              in: {
-                $concatArrays: [
-                  "$$value",
-                  { $ifNull: ["$$this.attributes", []] },
-                ],
-              },
-            },
-          },
-        },
-      },
-
-      // SAFE attributeId + attributeKey
-      {
-        $addFields: {
-          allAttributes: {
-            $map: {
-              input: "$allAttributes",
-              as: "attr",
-              in: {
-                attributeId: "$$attr.attribute",
-                attributeKey: {
-                  $cond: {
-                    if: { $ne: ["$$attr.attribute", null] },
-                    then: { $toString: "$$attr.attribute" },
-                    else: null,
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-
-      // Collect attribute IDs
-      {
-        $addFields: {
-          attributeIds: {
-            $map: {
-              input: "$allAttributes",
-              as: "a",
-              in: "$$a.attributeId",
-            },
-          },
-        },
-      },
-
-      // Lookup attributes
+      // Get all attribute IDs from attribute sets with their pricing
       {
         $lookup: {
           from: "attributes",
-          let: { ids: "$attributeIds" },
-          pipeline: [
-            { $match: { $expr: { $in: ["$_id", "$$ids"] } } },
-            { $project: { pricing: 1 } },
-          ],
-          as: "attributeDetails",
+          localField: "attributeSets.attributes",
+          foreignField: "_id",
+          as: "setAttributes",
         },
       },
 
-      // Pricing map
+      // Direct attributes lookup
+      {
+        $lookup: {
+          from: "attributes",
+          localField: "attributes.attribute",
+          foreignField: "_id",
+          as: "directAttributeDetails",
+        },
+      },
+
+      // Calculate totals
       {
         $addFields: {
-          attributePricingMap: {
-            $arrayToObject: {
+          // Total from attribute sets (simple sum of all attribute pricings in sets)
+          attributeSetTotal: {
+            $sum: {
               $map: {
-                input: "$attributeDetails",
-                as: "a",
-                in: {
-                  k: { $toString: "$$a._id" },
-                  v: "$$a.pricing",
-                },
+                input: { $ifNull: ["$setAttributes", []] },
+                as: "attr",
+                in: { $ifNull: ["$$attr.pricing", 0] },
               },
             },
           },
-        },
-      },
 
-      // SAFE total calculation
-      {
-        $addFields: {
-          calculatedProjectTotal: {
+          // Total from direct attributes with quantities
+          directAttributesTotal: {
             $sum: {
               $map: {
-                input: "$allAttributes",
-                as: "a",
+                input: "$attributes",
+                as: "item",
                 in: {
-                  $cond: {
-                    if: { $ne: ["$$a.attributeKey", null] },
-                    then: {
+                  $multiply: [
+                    { $ifNull: ["$$item.quantity", 1] },
+                    {
                       $ifNull: [
                         {
-                          $getField: {
-                            field: "$$a.attributeKey",
-                            input: "$attributePricingMap",
-                          },
+                          $arrayElemAt: [
+                            {
+                              $map: {
+                                input: {
+                                  $filter: {
+                                    input: "$directAttributeDetails",
+                                    cond: {
+                                      $eq: ["$$this._id", "$$item.attribute"],
+                                    },
+                                  },
+                                },
+                                as: "attr",
+                                in: "$$attr.pricing",
+                              },
+                            },
+                            0,
+                          ],
                         },
                         0,
                       ],
                     },
-                    else: 0,
-                  },
+                  ],
                 },
               },
             },
@@ -1199,62 +1362,113 @@ export const getProjectStats = async (req, res) => {
         },
       },
 
-      // Final totals
       {
         $addFields: {
-          finalProjectTotal: {
+          totalAttributeValue: {
             $add: [
-              { $ifNull: ["$calculatedProjectTotal", 0] },
-              { $ifNull: ["$extracost", 0] },
+              { $ifNull: ["$attributeSetTotal", 0] },
+              { $ifNull: ["$directAttributesTotal", 0] },
             ],
           },
-          budgetVariance: {
-            $subtract: [
-              { $ifNull: ["$budget", 0] },
-              {
-                $add: [
-                  { $ifNull: ["$calculatedProjectTotal", 0] },
-                  { $ifNull: ["$extracost", 0] },
-                ],
-              },
+          finalProjectTotal: {
+            $add: [
+              { $ifNull: ["$attributeSetTotal", 0] },
+              { $ifNull: ["$directAttributesTotal", 0] },
+              { $ifNull: ["$extracost", 0] },
             ],
           },
         },
       },
 
-      // -------- AREA STATISTICS --------
+      // Group for statistics
       {
         $group: {
           _id: null,
           totalProjects: { $sum: 1 },
-          totalBudget: { $sum: { $ifNull: ["$budget", 0] } },
           totalExtracost: { $sum: { $ifNull: ["$extracost", 0] } },
-          totalAttributeValue: { $sum: "$calculatedProjectTotal" },
+          totalAttributeValue: { $sum: "$totalAttributeValue" },
           totalFinalValue: { $sum: "$finalProjectTotal" },
           averageProgress: { $avg: "$progressPercentage" },
-          
+
           // Area statistics
           totalArea: { $sum: { $ifNull: ["$area", 0] } },
           averageArea: { $avg: { $ifNull: ["$area", 0] } },
           minArea: { $min: { $ifNull: ["$area", 0] } },
           maxArea: { $max: { $ifNull: ["$area", 0] } },
 
+          // Status counts
           projectStatuses: { $push: "$projectStatus" },
           approvalStatuses: { $push: "$approvalStatus" },
+        },
+      },
 
-          overBudgetCount: {
-            $sum: { $cond: [{ $lt: ["$budgetVariance", 0] }, 1, 0] },
+      // Process status counts
+      {
+        $addFields: {
+          projectStatusBreakdown: {
+            planning: {
+              $size: {
+                $filter: {
+                  input: "$projectStatuses",
+                  cond: { $eq: ["$$this", "planning"] },
+                },
+              },
+            },
+            in_progress: {
+              $size: {
+                $filter: {
+                  input: "$projectStatuses",
+                  cond: { $eq: ["$$this", "in_progress"] },
+                },
+              },
+            },
+            on_hold: {
+              $size: {
+                $filter: {
+                  input: "$projectStatuses",
+                  cond: { $eq: ["$$this", "on_hold"] },
+                },
+              },
+            },
+            completed: {
+              $size: {
+                $filter: {
+                  input: "$projectStatuses",
+                  cond: { $eq: ["$$this", "completed"] },
+                },
+              },
+            },
           },
-          underBudgetCount: {
-            $sum: { $cond: [{ $gt: ["$budgetVariance", 0] }, 1, 0] },
-          },
-          exactBudgetCount: {
-            $sum: { $cond: [{ $eq: ["$budgetVariance", 0] }, 1, 0] },
+          approvalStatusBreakdown: {
+            pending: {
+              $size: {
+                $filter: {
+                  input: "$approvalStatuses",
+                  cond: { $eq: ["$$this", "pending"] },
+                },
+              },
+            },
+            approved: {
+              $size: {
+                $filter: {
+                  input: "$approvalStatuses",
+                  cond: { $eq: ["$$this", "approved"] },
+                },
+              },
+            },
+            rejected: {
+              $size: {
+                $filter: {
+                  input: "$approvalStatuses",
+                  cond: { $eq: ["$$this", "rejected"] },
+                },
+              },
+            },
           },
         },
       },
 
-      // -------- FINAL SHAPE --------
+      // Final projection
       {
         $project: {
           _id: 0,
@@ -1266,26 +1480,46 @@ export const getProjectStats = async (req, res) => {
             maxArea: "$maxArea",
           },
           financialSummary: {
-            totalBudget: "$totalBudget",
             totalExtracost: "$totalExtracost",
             totalAttributeValue: "$totalAttributeValue",
             totalProjectValue: "$totalFinalValue",
           },
           averageProgress: { $round: ["$averageProgress", 2] },
-          budgetHealth: {
-            overBudget: "$overBudgetCount",
-            underBudget: "$underBudgetCount",
-            exactBudget: "$exactBudgetCount",
-          },
+          projectStatusBreakdown: 1,
+          approvalStatusBreakdown: 1,
         },
       },
     ]);
 
     res.json({
       success: true,
-      data: stats[0] || {},
+      data: stats[0] || {
+        totalProjects: 0,
+        areaStatistics: {
+          totalArea: 0,
+          averageArea: 0,
+          minArea: 0,
+          maxArea: 0,
+        },
+        financialSummary: {
+          totalExtracost: 0,
+          totalAttributeValue: 0,
+          totalProjectValue: 0,
+        },
+        averageProgress: 0,
+        projectStatusBreakdown: {
+          planning: 0,
+          in_progress: 0,
+          on_hold: 0,
+          completed: 0,
+        },
+        approvalStatusBreakdown: {
+          pending: 0,
+          approved: 0,
+          rejected: 0,
+        },
+      },
     });
-
   } catch (error) {
     console.error("Get Project Stats Error:", error);
     res.status(500).json({
@@ -1299,6 +1533,13 @@ export const updatePhaseCompletion = async (req, res) => {
   try {
     const { projectId, phaseIndex } = req.params;
     const { isCompleted } = req.body;
+
+    if (!mongoose.Types.ObjectId.isValid(projectId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid project ID",
+      });
+    }
 
     const project = await Project.findById(projectId);
     if (!project) {
@@ -1346,11 +1587,238 @@ export const updatePhaseCompletion = async (req, res) => {
 
     await project.save();
 
+    // Populate response
+    const populatedProject = await Project.findById(project._id)
+      .populate("client", "name email phoneNumber")
+      .populate("site_manager", "name email phoneNumber")
+      .populate("labour", "name email phoneNumber")
+      .populate("createdBy", "name email")
+      .populate("AttributeSet")
+      .populate({
+        path: "attributes.attribute",
+        model: "Attribute",
+        select: "label type unit pricing",
+      });
+
     res.json({
       success: true,
-      data: project,
+      data: populatedProject,
     });
   } catch (error) {
+    console.error("Update Phase Completion Error:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+// Additional helper function to add attributes to a project
+export const addProjectAttributes = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { attributes } = req.body;
+
+    if (!isAdmin(req.user.role)) {
+      return res.status(403).json({
+        success: false,
+        message: "Only admins can add attributes to projects",
+      });
+    }
+
+    const project = await Project.findById(id);
+    if (!project) {
+      return res.status(404).json({
+        success: false,
+        message: "Project not found",
+      });
+    }
+
+    if (!canAccessProject(req.user, project)) {
+      return res.status(403).json({
+        success: false,
+        message: "Not authorized to update this project",
+      });
+    }
+
+    if (!attributes || !Array.isArray(attributes)) {
+      return res.status(400).json({
+        success: false,
+        message: "Attributes must be an array",
+      });
+    }
+
+    // Validate each attribute
+    for (const item of attributes) {
+      if (!item.attribute || !item.quantity) {
+        return res.status(400).json({
+          success: false,
+          message: "Each attribute must have attribute ID and quantity",
+        });
+      }
+
+      if (item.quantity < 1) {
+        return res.status(400).json({
+          success: false,
+          message: "Quantity must be at least 1",
+        });
+      }
+
+      const attributeExists = await Attribute.findById(item.attribute);
+      if (!attributeExists) {
+        return res.status(404).json({
+          success: false,
+          message: `Attribute with ID ${item.attribute} not found`,
+        });
+      }
+
+      // Check for duplicates
+      const existingAttribute = project.attributes.find(
+        (attr) => attr.attribute.toString() === item.attribute,
+      );
+
+      if (existingAttribute) {
+        return res.status(400).json({
+          success: false,
+          message: `Attribute ${item.attribute} already exists in project`,
+        });
+      }
+    }
+
+    // Add new attributes
+    project.attributes.push(...attributes);
+    await project.save();
+
+    const populatedProject = await Project.findById(project._id).populate(
+      "attributes.attribute",
+    );
+
+    res.json({
+      success: true,
+      data: populatedProject,
+    });
+  } catch (error) {
+    console.error("Add Project Attributes Error:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+// Helper function to update attribute quantity
+export const updateAttributeQuantity = async (req, res) => {
+  try {
+    const { projectId, attributeId } = req.params;
+    const { quantity } = req.body;
+
+    if (!isAdmin(req.user.role)) {
+      return res.status(403).json({
+        success: false,
+        message: "Only admins can update attribute quantities",
+      });
+    }
+
+    const project = await Project.findById(projectId);
+    if (!project) {
+      return res.status(404).json({
+        success: false,
+        message: "Project not found",
+      });
+    }
+
+    if (!canAccessProject(req.user, project)) {
+      return res.status(403).json({
+        success: false,
+        message: "Not authorized to update this project",
+      });
+    }
+
+    const attributeIndex = project.attributes.findIndex(
+      (attr) => attr.attribute.toString() === attributeId,
+    );
+
+    if (attributeIndex === -1) {
+      return res.status(404).json({
+        success: false,
+        message: "Attribute not found in project",
+      });
+    }
+
+    if (quantity < 1) {
+      return res.status(400).json({
+        success: false,
+        message: "Quantity must be at least 1",
+      });
+    }
+
+    project.attributes[attributeIndex].quantity = quantity;
+    await project.save();
+
+    const populatedProject = await Project.findById(project._id).populate(
+      "attributes.attribute",
+    );
+
+    res.json({
+      success: true,
+      data: populatedProject,
+    });
+  } catch (error) {
+    console.error("Update Attribute Quantity Error:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+// Helper function to remove attribute from project
+export const removeProjectAttribute = async (req, res) => {
+  try {
+    const { projectId, attributeId } = req.params;
+
+    if (!isAdmin(req.user.role)) {
+      return res.status(403).json({
+        success: false,
+        message: "Only admins can remove attributes from projects",
+      });
+    }
+
+    const project = await Project.findById(projectId);
+    if (!project) {
+      return res.status(404).json({
+        success: false,
+        message: "Project not found",
+      });
+    }
+
+    if (!canAccessProject(req.user, project)) {
+      return res.status(403).json({
+        success: false,
+        message: "Not authorized to update this project",
+      });
+    }
+
+    const initialLength = project.attributes.length;
+    project.attributes = project.attributes.filter(
+      (attr) => attr.attribute.toString() !== attributeId,
+    );
+
+    if (project.attributes.length === initialLength) {
+      return res.status(404).json({
+        success: false,
+        message: "Attribute not found in project",
+      });
+    }
+
+    await project.save();
+
+    res.json({
+      success: true,
+      message: "Attribute removed from project successfully",
+    });
+  } catch (error) {
+    console.error("Remove Project Attribute Error:", error);
     res.status(500).json({
       success: false,
       message: error.message,
