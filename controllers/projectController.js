@@ -978,7 +978,7 @@ export const updateProject = async (req, res) => {
       }
     }
 
-    // ✅ Direct attributes validation
+    // ✅ Direct attributes validation - REPLACES entire attributes array
     if (req.body.attributes !== undefined) {
       if (!isAdmin(req.user.role)) {
         return res.status(403).json({
@@ -1196,7 +1196,136 @@ export const updateProject = async (req, res) => {
 
     await project.save();
 
-    // Populate response
+    // ✅ Calculate totals for response (similar to getProjectById logic)
+    const pipeline = [
+      { $match: { _id: project._id } },
+      
+      // Populate attribute sets with their attributes
+      {
+        $lookup: {
+          from: "attributesets",
+          localField: "AttributeSet",
+          foreignField: "_id",
+          as: "attributeSets",
+          pipeline: [
+            {
+              $lookup: {
+                from: "attributes",
+                localField: "attributes",
+                foreignField: "_id",
+                as: "populatedAttributes",
+              }
+            },
+            {
+              $addFields: {
+                attributes: "$populatedAttributes"
+              }
+            }
+          ]
+        }
+      },
+      
+      // Populate direct attributes
+      {
+        $lookup: {
+          from: "attributes",
+          localField: "attributes.attribute",
+          foreignField: "_id",
+          as: "directAttributeDetails",
+        }
+      },
+      
+      // Calculate totals
+      {
+        $addFields: {
+          // Total from attribute sets
+          attributeSetTotal: {
+            $sum: {
+              $reduce: {
+                input: "$attributeSets",
+                initialValue: [],
+                in: { $concatArrays: ["$$value", "$$this.attributes"] }
+              }
+            }
+          },
+          
+          // Create map for direct attributes
+          directAttributeMap: {
+            $arrayToObject: {
+              $map: {
+                input: "$directAttributeDetails",
+                as: "attr",
+                in: {
+                  k: { $toString: "$$attr._id" },
+                  v: "$$attr"
+                }
+              }
+            }
+          }
+        }
+      },
+      
+      {
+        $addFields: {
+          // Recalculate attribute set total with pricing
+          calculatedSetTotal: {
+            $sum: {
+              $map: {
+                input: { $ifNull: ["$attributeSetTotal", []] },
+                as: "attr",
+                in: { $ifNull: ["$$attr.pricing", 0] }
+              }
+            }
+          },
+          
+          // Calculate direct attributes total with quantities
+          calculatedDirectTotal: {
+            $sum: {
+              $map: {
+                input: "$attributes",
+                as: "item",
+                in: {
+                  $multiply: [
+                    { $ifNull: ["$$item.quantity", 1] },
+                    { 
+                      $ifNull: [
+                        { $getField: { 
+                          field: { $toString: "$$item.attribute" }, 
+                          input: "$directAttributeMap.pricing" 
+                        }}, 
+                        0 
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      
+      {
+        $addFields: {
+          projectTotal: {
+            $add: [
+              { $ifNull: ["$calculatedSetTotal", 0] },
+              { $ifNull: ["$calculatedDirectTotal", 0] }
+            ]
+          },
+          finalProjectTotal: {
+            $add: [
+              { $ifNull: ["$calculatedSetTotal", 0] },
+              { $ifNull: ["$calculatedDirectTotal", 0] },
+              { $ifNull: ["$extracost", 0] }
+            ]
+          }
+        }
+      }
+    ];
+
+    const [projectWithTotals] = await Project.aggregate(pipeline);
+
+    // Populate response with user details
     const populatedProject = await Project.findById(project._id)
       .populate("client", "name email phoneNumber")
       .populate("site_manager", "name email phoneNumber")
@@ -1209,9 +1338,17 @@ export const updateProject = async (req, res) => {
         select: "label type unit pricing",
       });
 
+    // Merge the totals with populated project
+    const responseData = {
+      ...populatedProject.toObject(),
+      projectTotal: projectWithTotals?.projectTotal || 0,
+      finalProjectTotal: projectWithTotals?.finalProjectTotal || 0,
+      attributeSets: projectWithTotals?.attributeSets || []
+    };
+
     return res.json({
       success: true,
-      data: populatedProject,
+      data: responseData,
     });
   } catch (error) {
     console.error("Update Project Error:", error);
