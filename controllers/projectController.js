@@ -439,8 +439,6 @@ export const getProjectById = async (req, res) => {
     const pipeline = [
       { $match: { _id: projectId } },
 
-      /* ---------------- USERS ---------------- */
-
       {
         $lookup: {
           from: "users",
