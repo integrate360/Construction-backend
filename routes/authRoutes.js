@@ -11,7 +11,8 @@ import {
   updateUserByAdmin,
   deactivateUser,
   activateUser,
-  getAllUsernotclient
+  getAllUsernotclient,
+  deleteUser
 } from "../controllers/authController.js";
 
 import authMiddleware from "../middleware/authmiddleware.js";
@@ -54,6 +55,11 @@ router.delete(
   "/delete-user/:id",
   authMiddleware,
   deactivateUser
+);
+router.delete(
+  "/deleteUser/:id",
+  authMiddleware,
+  deleteUser
 );
 
 router.put(
