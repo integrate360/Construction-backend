@@ -24,6 +24,7 @@ export const createProject = async (req, res) => {
       projectName,
       siteName,
       location,
+      area, // Added area field
       client, // optional
       labour, // optional
       site_manager, // optional
@@ -41,12 +42,21 @@ export const createProject = async (req, res) => {
       !siteName ||
       !startDate ||
       !extracost ||
-      !attributeSetIds
+      !attributeSetIds ||
+      !area // Added area as required field
     ) {
       return res.status(400).json({
         success: false,
         message:
-          "Missing required fields: projectName, siteName, startDate, extracost, and AttributeSet are required",
+          "Missing required fields: projectName, siteName, startDate, extracost, area, and AttributeSet are required",
+      });
+    }
+
+    // ✅ Validate area
+    if (area < 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Area cannot be negative",
       });
     }
 
@@ -155,6 +165,7 @@ export const createProject = async (req, res) => {
       projectName,
       siteName,
       location,
+      area, // Added area field
       client: client || null,
       labour: labour || [],
       site_manager: site_manager || null,
@@ -432,6 +443,7 @@ export const getProjects = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+
 export const getProjectById = async (req, res) => {
   try {
     const projectId = new mongoose.Types.ObjectId(req.params.id);
@@ -909,6 +921,7 @@ export const updateProject = async (req, res) => {
     const basicFields = [
       "projectName",
       "siteName",
+      "area", // Added area field
       "startDate",
       "expectedEndDate",
       "extracost",
@@ -929,6 +942,14 @@ export const updateProject = async (req, res) => {
           }
         }
         
+        // Validation for area
+        if (field === "area" && req.body.area < 0) {
+          return res.status(400).json({
+            success: false,
+            message: "Area cannot be negative",
+          });
+        }
+
         // Validation for extracost
         if (field === "extracost" && req.body.extracost < 0) {
           return res.status(400).json({
@@ -1201,7 +1222,7 @@ export const getProjectStats = async (req, res) => {
         },
       },
 
-      // -------- GROUP STATS --------
+      // -------- AREA STATISTICS --------
       {
         $group: {
           _id: null,
@@ -1211,6 +1232,12 @@ export const getProjectStats = async (req, res) => {
           totalAttributeValue: { $sum: "$calculatedProjectTotal" },
           totalFinalValue: { $sum: "$finalProjectTotal" },
           averageProgress: { $avg: "$progressPercentage" },
+          
+          // Area statistics
+          totalArea: { $sum: { $ifNull: ["$area", 0] } },
+          averageArea: { $avg: { $ifNull: ["$area", 0] } },
+          minArea: { $min: { $ifNull: ["$area", 0] } },
+          maxArea: { $max: { $ifNull: ["$area", 0] } },
 
           projectStatuses: { $push: "$projectStatus" },
           approvalStatuses: { $push: "$approvalStatus" },
@@ -1232,6 +1259,12 @@ export const getProjectStats = async (req, res) => {
         $project: {
           _id: 0,
           totalProjects: 1,
+          areaStatistics: {
+            totalArea: "$totalArea",
+            averageArea: { $round: ["$averageArea", 2] },
+            minArea: "$minArea",
+            maxArea: "$maxArea",
+          },
           financialSummary: {
             totalBudget: "$totalBudget",
             totalExtracost: "$totalExtracost",

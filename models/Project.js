@@ -72,6 +72,13 @@ const projectSchema = new mongoose.Schema(
 
     location: locationSchema,
 
+    area: {
+      type: Number,
+      required: true,
+      min: 0,
+      description: "Area in square meters/feet",
+    },
+
     client: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
