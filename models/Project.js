@@ -45,12 +45,12 @@ const documentSchema = new mongoose.Schema(
   {
     name: {
       type: String,
-      required: true,
+      // required: true,
       trim: true,
     },
     url: {
       type: String,
-      required: true,
+      // required: true,
     },
   },
   { _id: false },
@@ -123,7 +123,7 @@ const projectSchema = new mongoose.Schema(
 
     startDate: {
       type: Date,
-      required: true,
+      // required: true,
     },
 
     expectedEndDate: {
