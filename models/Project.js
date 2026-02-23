@@ -71,7 +71,7 @@ const projectSchema = new mongoose.Schema(
     },
      area: {
       type: Number,
-      required: true,
+      // required: true,
       min: 0,
       description: "Area in square feet/meters",
     },
