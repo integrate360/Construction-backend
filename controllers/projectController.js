@@ -203,29 +203,25 @@ export const getProjects = async (req, res) => {
       search,
       sortBy = "createdAt",
       sortOrder = "desc",
-      includeBudgetBreakdown = "false", 
+      includeBudgetBreakdown = "false",
     } = req.query;
 
-    // Base filter from role
     const filter = buildRoleFilter(req.user);
 
-    // Status filters apply to all roles
     if (projectStatus) filter.projectStatus = projectStatus;
     if (approvalStatus) filter.approvalStatus = approvalStatus;
 
-    // Only admins can additionally filter by client/site_manager from query
     if (isAdmin(req.user.role)) {
       if (client) filter.client = new mongoose.Types.ObjectId(client);
       if (site_manager) filter.site_manager = new mongoose.Types.ObjectId(site_manager);
       if (labour) {
-        const labourIds = Array.isArray(labour) 
+        const labourIds = Array.isArray(labour)
           ? labour.map(id => new mongoose.Types.ObjectId(id))
           : [new mongoose.Types.ObjectId(labour)];
         filter.labour = { $in: labourIds };
       }
     }
 
-    // Search filter
     if (search) {
       filter.$or = [
         { projectName: { $regex: search, $options: "i" } },
@@ -237,138 +233,34 @@ export const getProjects = async (req, res) => {
       ];
     }
 
-    const skip = (parseInt(page) - 1) * parseInt(limit);
-    const sortStage = {};
-    sortStage[sortBy] = sortOrder === "desc" ? -1 : 1;
+    const skip = (page - 1) * limit;
+    const sortStage = { [sortBy]: sortOrder === "desc" ? -1 : 1 };
 
-    // Aggregation pipeline
     const pipeline = [
-      // Match stage
       { $match: filter },
-      
-      // Sort stage
       { $sort: sortStage },
-      
-      // Skip for pagination
       { $skip: skip },
-      
-      // Limit for pagination
-      { $limit: parseInt(limit) },
-      
-      // Lookup client details
-      {
-        $lookup: {
-          from: "users",
-          localField: "client",
-          foreignField: "_id",
-          as: "client"
-        }
-      },
-      {
-        $unwind: {
-          path: "$client",
-          preserveNullAndEmptyArrays: true
-        }
-      },
-      {
-        $addFields: {
-          "client": {
-            _id: "$client._id",
-            name: "$client.name",
-            email: "$client.email",
-            phoneNumber: "$client.phoneNumber"
-          }
-        }
-      },
-      
-      // Lookup site manager details
-      {
-        $lookup: {
-          from: "users",
-          localField: "site_manager",
-          foreignField: "_id",
-          as: "site_manager"
-        }
-      },
-      {
-        $unwind: {
-          path: "$site_manager",
-          preserveNullAndEmptyArrays: true
-        }
-      },
-      {
-        $addFields: {
-          "site_manager": {
-            _id: "$site_manager._id",
-            name: "$site_manager.name",
-            email: "$site_manager.email",
-            phoneNumber: "$site_manager.phoneNumber"
-          }
-        }
-      },
-      
-      // Lookup labour details
-      {
-        $lookup: {
-          from: "users",
-          localField: "labour",
-          foreignField: "_id",
-          as: "labour"
-        }
-      },
-      {
-        $addFields: {
-          "labour": {
-            $map: {
-              input: "$labour",
-              as: "l",
-              in: {
-                _id: "$$l._id",
-                name: "$$l.name",
-                email: "$$l.email",
-                phoneNumber: "$$l.phoneNumber"
-              }
-            }
-          }
-        }
-      },
-      
-      // Lookup createdBy details
-      {
-        $lookup: {
-          from: "users",
-          localField: "createdBy",
-          foreignField: "_id",
-          as: "createdBy"
-        }
-      },
-      {
-        $unwind: {
-          path: "$createdBy",
-          preserveNullAndEmptyArrays: true
-        }
-      },
-      {
-        $addFields: {
-          "createdBy": {
-            _id: "$createdBy._id",
-            name: "$createdBy.name",
-            email: "$createdBy.email"
-          }
-        }
-      },
-      
-      // Lookup attribute sets
+      { $limit: Number(limit) },
+
+      // -------- USERS LOOKUPS --------
+      { $lookup: { from: "users", localField: "client", foreignField: "_id", as: "client" } },
+      { $unwind: { path: "$client", preserveNullAndEmptyArrays: true } },
+
+      { $lookup: { from: "users", localField: "site_manager", foreignField: "_id", as: "site_manager" } },
+      { $unwind: { path: "$site_manager", preserveNullAndEmptyArrays: true } },
+
+      { $lookup: { from: "users", localField: "labour", foreignField: "_id", as: "labour" } },
+
+      // -------- ATTRIBUTE SETS --------
       {
         $lookup: {
           from: "attributesets",
           localField: "AttributeSet",
           foreignField: "_id",
-          as: "attributeSets"
-        }
+          as: "attributeSets",
+        },
       },
-      
-      // Process attribute sets to get valid attributes
+
       {
         $addFields: {
           attributeSets: {
@@ -384,17 +276,23 @@ export const getProjects = async (req, res) => {
                     as: "attr",
                     in: {
                       _id: "$$attr._id",
-                      attributeId: "$$attr.attribute"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
+                      attributeId: "$$attr.attribute",
+                      attributeKey: {
+                        $cond: {
+                          if: { $ne: ["$$attr.attribute", null] },
+                          then: { $toString: "$$attr.attribute" },
+                          else: null,
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
       },
-      
-      // Get all attribute IDs from all sets
+
       {
         $addFields: {
           allAttributeIds: {
@@ -406,104 +304,47 @@ export const getProjects = async (req, res) => {
                   "$$value",
                   {
                     $map: {
-                      input: { $ifNull: ["$$this.attributes", []] },
-                      as: "attr",
-                      in: "$$attr.attributeId"
-                    }
-                  }
-                ]
-              }
-            }
-          }
-        }
+                      input: "$$this.attributes",
+                      as: "a",
+                      in: "$$a.attributeId",
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        },
       },
-      
-      // Lookup all attributes in one go
+
       {
         $lookup: {
           from: "attributes",
-          let: { attributeIds: "$allAttributeIds" },
+          let: { ids: "$allAttributeIds" },
           pipeline: [
-            {
-              $match: {
-                $expr: { $in: ["$_id", "$$attributeIds"] }
-              }
-            },
-            {
-              $project: {
-                _id: 1,
-                label: 1,
-                type: 1,
-                pricing: 1
-              }
-            }
+            { $match: { $expr: { $in: ["$_id", "$$ids"] } } },
+            { $project: { label: 1, pricing: 1 } },
           ],
-          as: "allAttributes"
-        }
+          as: "allAttributes",
+        },
       },
-      
-      // Create attribute map for easy lookup
+
       {
         $addFields: {
           attributeMap: {
             $arrayToObject: {
               $map: {
                 input: "$allAttributes",
-                as: "attr",
+                as: "a",
                 in: {
-                  k: { $toString: "$$attr._id" },
-                  v: "$$attr"
-                }
-              }
-            }
-          }
-        }
+                  k: { $toString: "$$a._id" },
+                  v: "$$a",
+                },
+              },
+            },
+          },
+        },
       },
-      
-      // Reconstruct attribute sets with populated attributes - FIXED VERSION
-      {
-        $addFields: {
-          attributeSets: {
-            $map: {
-              input: "$attributeSets",
-              as: "set",
-              in: {
-                _id: "$$set._id",
-                name: "$$set.name",
-                attributes: {
-                  $map: {
-                    input: { $ifNull: ["$$set.attributes", []] },
-                    as: "attr",
-                    in: {
-                      _id: "$$attr._id",
-                      attributeId: "$$attr.attributeId",
-                      attribute: {
-                        $cond: {
-                          if: { 
-                            $and: [
-                              { $ne: ["$$attr.attributeId", null] },
-                              { $ne: ["$$attr.attributeId", undefined] }
-                            ]
-                          },
-                          then: {
-                            $getField: { 
-                              field: { $toString: "$$attr.attributeId" }, 
-                              input: "$attributeMap" 
-                            }
-                          },
-                          else: null
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      
-      // Calculate totals for each attribute set - FIXED VERSION with null checks
+
       {
         $addFields: {
           attributeSets: {
@@ -518,87 +359,28 @@ export const getProjects = async (req, res) => {
                     input: "$$set.attributes",
                     as: "attr",
                     in: {
-                      _id: "$$attr._id",
-                      attribute: "$$attr.attribute",
                       attributeId: "$$attr.attributeId",
-                      totalCost: {
+                      attribute: {
                         $cond: {
-                          if: { 
-                            $and: [
-                              { $ne: ["$$attr.attribute", null] },
-                              { $ne: ["$$attr.attribute.pricing", null] },
-                              { $isNumber: { $ifNull: ["$$attr.attribute.pricing", null] } }
-                            ]
+                          if: { $ne: ["$$attr.attributeKey", null] },
+                          then: {
+                            $getField: {
+                              field: "$$attr.attributeKey",
+                              input: "$attributeMap",
+                            },
                           },
-                          then: "$$attr.attribute.pricing",
-                          else: 0
-                        }
-                      }
-                    }
-                  }
-                },
-                setTotal: {
-                  $sum: {
-                    $map: {
-                      input: "$$set.attributes",
-                      as: "attr",
-                      in: {
-                        $cond: {
-                          if: { 
-                            $and: [
-                              { $ne: ["$$attr.attribute", null] },
-                              { $ne: ["$$attr.attribute.pricing", null] },
-                              { $isNumber: { $ifNull: ["$$attr.attribute.pricing", null] } }
-                            ]
-                          },
-                          then: "$$attr.attribute.pricing",
-                          else: 0
-                        }
-                      }
-                    }
-                  }
-                },
-                attributeCount: { $size: "$$set.attributes" },
-                validAttributes: {
-                  $size: {
-                    $filter: {
-                      input: "$$set.attributes",
-                      as: "attr",
-                      cond: { 
-                        $and: [
-                          { $ne: ["$$attr.attribute", null] },
-                          { $ne: ["$$attr.attribute.pricing", null] },
-                          { $isNumber: { $ifNull: ["$$attr.attribute.pricing", null] } }
-                        ]
-                      }
-                    }
-                  }
-                },
-                invalidAttributeIds: {
-                  $map: {
-                    input: {
-                      $filter: {
-                        input: "$$set.attributes",
-                        as: "attr",
-                        cond: { 
-                          $or: [
-                            { $eq: ["$$attr.attribute", null] },
-                            { $eq: [{ $ifNull: ["$$attr.attribute.pricing", null] }, null] }
-                          ]
-                        }
-                      }
+                          else: null,
+                        },
+                      },
                     },
-                    as: "attr",
-                    in: "$$attr.attributeId"
-                  }
-                }
-              }
-            }
-          }
-        }
+                  },
+                },
+              },
+            },
+          },
+        },
       },
-      
-      // Calculate project total from attribute sets - FIXED VERSION
+
       {
         $addFields: {
           projectTotal: {
@@ -606,247 +388,48 @@ export const getProjects = async (req, res) => {
               $map: {
                 input: "$attributeSets",
                 as: "set",
-                in: { $ifNull: ["$$set.setTotal", 0] }
-              }
-            }
-          },
-          totalInvalidAttributeCount: {
-            $sum: {
-              $map: {
-                input: "$attributeSets",
-                as: "set",
                 in: {
-                  $size: { $ifNull: ["$$set.invalidAttributeIds", []] }
-                }
-              }
-            }
-          }
-        }
+                  $sum: {
+                    $map: {
+                      input: "$$set.attributes",
+                      as: "a",
+                      in: { $ifNull: ["$$a.attribute.pricing", 0] },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
       },
-      
-      // Calculate final total including extracost
+
       {
         $addFields: {
           finalProjectTotal: {
-            $add: [
-              { $ifNull: ["$projectTotal", 0] },
-              { $ifNull: ["$extracost", 0] }
-            ]
-          }
-        }
-      },
-      
-      // Calculate total valid and invalid attributes
-      {
-        $addFields: {
-          totalAttributes: {
-            $sum: {
-              $map: {
-                input: "$attributeSets",
-                as: "set",
-                in: { $ifNull: ["$$set.attributeCount", 0] }
-              }
-            }
+            $add: [{ $ifNull: ["$projectTotal", 0] }, { $ifNull: ["$extracost", 0] }],
           },
-          totalValidAttributes: {
-            $sum: {
-              $map: {
-                input: "$attributeSets",
-                as: "set",
-                in: { $ifNull: ["$$set.validAttributes", 0] }
-              }
-            }
-          }
-        }
+        },
       },
-      
-      // Add percentage calculations for each set
-      {
-        $addFields: {
-          attributeSets: {
-            $map: {
-              input: "$attributeSets",
-              as: "set",
-              in: {
-                $mergeObjects: [
-                  "$$set",
-                  {
-                    percentageOfTotal: {
-                      $cond: {
-                        if: { $gt: ["$projectTotal", 0] },
-                        then: {
-                          $concat: [
-                            { $toString: { $round: [{ $multiply: [{ $divide: ["$$set.setTotal", "$projectTotal"] }, 100] }, 2] } },
-                            "%"
-                          ]
-                        },
-                        else: "0%"
-                      }
-                    }
-                  }
-                ]
-              }
-            }
-          }
-        }
-      },
-      
-      // Clean up temporary fields
-      {
-        $project: {
-          allAttributeIds: 0,
-          allAttributes: 0,
-          attributeMap: 0
-        }
-      }
+
+      { $project: { allAttributes: 0, attributeMap: 0, allAttributeIds: 0 } },
     ];
 
-    // Execute aggregation for projects
     const projects = await Project.aggregate(pipeline);
-
-    // Get total count for pagination
     const total = await Project.countDocuments(filter);
-
-    // Transform projects to include budget breakdown if requested
-    let transformedProjects = projects;
-    
-    if (includeBudgetBreakdown === "true") {
-      transformedProjects = projects.map(project => {
-        const projectTotal = project.projectTotal || 0;
-        const extracost = project.extracost || 0;
-        const finalProjectTotal = project.finalProjectTotal || (projectTotal + extracost);
-        const totalBudget = project.budget || 0;
-
-        // Calculate phase budget allocation (simplified for list view)
-        const phaseWeightages = {
-          'FOUNDATION': 0.20,
-          'STRUCTURE': 0.40,
-          'FINISHING': 0.30,
-          'HANDOVER': 0.10
-        };
-
-        const phaseBudgetAllocation = (project.phases || []).map((phase, index) => {
-          const phaseName = phase.phaseName;
-          const weightage = phaseWeightages[phaseName] || 0;
-          const allocatedBudget = totalBudget * weightage;
-          
-          return {
-            phaseName: phase.phaseName,
-            completionPercentage: phase.completionPercentage || 0,
-            isCompleted: phase.isCompleted || false,
-            allocatedBudget: Math.round(allocatedBudget),
-            weightage: `${weightage * 100}%`
-          };
-        });
-
-        // Create comprehensive budget breakdown
-        const budgetBreakdown = {
-          // Main cost components
-          totalAttributesValue: projectTotal,
-          extracostValue: extracost,
-          finalTotalValue: finalProjectTotal,
-          
-          // Simplified attribute sets for list view
-          attributeSets: (project.attributeSets || []).map(set => ({
-            _id: set._id,
-            name: set.name,
-            totalPricing: set.setTotal || 0,
-            attributeCount: set.attributeCount || 0,
-            validAttributes: set.validAttributes || 0,
-            invalidAttributes: (set.attributeCount || 0) - (set.validAttributes || 0),
-            percentageOfTotal: set.percentageOfTotal || "0%",
-            invalidAttributeIds: set.invalidAttributeIds || [],
-            // Include top items only for list view (first 2 items)
-            topItems: (set.attributes || [])
-              .filter(attr => attr.attribute && attr.attribute.pricing)
-              .slice(0, 2)
-              .map(attr => ({
-                label: attr.attribute?.label || 'Unknown',
-                totalPrice: attr.totalCost || 0
-              }))
-          })),
-          
-          // Summary statistics
-          summary: {
-            totalItems: project.totalAttributes || 0,
-            totalValidItems: project.totalValidAttributes || 0,
-            totalInvalidItems: project.totalInvalidAttributeCount || 0,
-            averagePricePerItem: project.totalValidAttributes > 0 
-              ? (projectTotal / project.totalValidAttributes).toFixed(2) 
-              : "0.00"
-          },
-          
-          // Budget utilization
-          budgetUtilization: {
-            totalBudget,
-            allocatedValue: projectTotal,
-            extracost,
-            finalTotal: finalProjectTotal,
-            remainingBudget: totalBudget - finalProjectTotal,
-            allocatedPercentage: totalBudget > 0 
-              ? ((projectTotal / totalBudget) * 100).toFixed(2) + '%' 
-              : '0%',
-            finalTotalPercentage: totalBudget > 0 
-              ? ((finalProjectTotal / totalBudget) * 100).toFixed(2) + '%' 
-              : '0%',
-            status: totalBudget === 0 ? 'NO_BUDGET' :
-                    finalProjectTotal > totalBudget ? 'OVER_BUDGET' : 
-                    finalProjectTotal === totalBudget ? 'FULLY_ALLOCATED' : 
-                    'WITHIN_BUDGET',
-            utilizationRatio: totalBudget > 0 
-              ? (finalProjectTotal / totalBudget).toFixed(2) 
-              : '0.00'
-          }
-        };
-
-        return {
-          ...project,
-          // Include all totals
-          projectTotal,
-          extracost,
-          finalProjectTotal,
-          totalInvalidAttributeCount: project.totalInvalidAttributeCount || 0,
-          // Add breakdowns
-          budgetBreakdown,
-          phaseBudgetAllocation,
-          // Quick status indicator
-          budgetStatus: {
-            isOverBudget: finalProjectTotal > totalBudget,
-            overBudgetAmount: finalProjectTotal > totalBudget ? finalProjectTotal - totalBudget : 0,
-            budgetUtilizationPercent: totalBudget > 0 
-              ? ((finalProjectTotal / totalBudget) * 100).toFixed(2) + '%'
-              : 'N/A'
-          }
-        };
-      });
-    } else {
-      // Even without full breakdown, include basic totals
-      transformedProjects = projects.map(project => ({
-        ...project,
-        projectTotal: project.projectTotal || 0,
-        extracost: project.extracost || 0,
-        finalProjectTotal: (project.projectTotal || 0) + (project.extracost || 0),
-        totalInvalidAttributeCount: project.totalInvalidAttributeCount || 0
-      }));
-    }
 
     res.json({
       success: true,
-      data: transformedProjects,
+      data: projects,
       pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
+        page: Number(page),
+        limit: Number(limit),
         total,
-        pages: Math.ceil(total / parseInt(limit)),
+        pages: Math.ceil(total / limit),
       },
     });
-
   } catch (error) {
     console.error("Get Projects Error:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
