@@ -829,35 +829,57 @@ export const getProjectById = async (req, res) => {
 
 export const updateProject = async (req, res) => {
   try {
-    // 🔐 Role check
-    if (req.user.role === "client" || req.user.role === "labour") {
+    console.log("🔵 Update Project API called");
+    console.log("➡️ User:", {
+      id: req.user?._id,
+      role: req.user?.role,
+    });
+    console.log("➡️ Project ID:", req.params.id);
+    console.log("➡️ Request Body:", JSON.stringify(req.body, null, 2));
+
+    /* ===============================
+       ROLE CHECK
+    =============================== */
+    if (["client", "labour"].includes(req.user.role)) {
+      console.log("❌ Role not allowed:", req.user.role);
       return res.status(403).json({
         success: false,
         message: "You do not have permission to update projects",
       });
     }
 
+    /* ===============================
+       PROJECT FETCH
+    =============================== */
     const project = await Project.findById(req.params.id);
     if (!project) {
+      console.log("❌ Project not found");
       return res.status(404).json({
         success: false,
         message: "Project not found",
       });
     }
 
-    // 🔐 Access control
+    console.log("✅ Project found:", project._id);
+
+    /* ===============================
+       ACCESS CONTROL
+    =============================== */
     if (!canAccessProject(req.user, project)) {
+      console.log("❌ Access denied");
       return res.status(403).json({
         success: false,
         message: "Not authorized to update this project",
       });
     }
 
+    console.log("✅ Access granted");
+
     /* ===============================
-       ADMIN-ONLY VALIDATIONS
+       ADMIN ONLY UPDATES
     =============================== */
 
-    // ✅ Client validation
+    // Client
     if (req.body.client !== undefined) {
       if (!isAdmin(req.user.role)) {
         return res.status(403).json({
@@ -865,326 +887,93 @@ export const updateProject = async (req, res) => {
           message: "Only admins can assign client",
         });
       }
-
-      if (req.body.client) {
-        const client = await User.findById(req.body.client);
-        if (!client) {
-          return res.status(404).json({
-            success: false,
-            message: "Client not found",
-          });
-        }
-
-        if (client.role !== "client") {
-          return res.status(400).json({
-            success: false,
-            message: "Assigned user must have the 'client' role",
-          });
-        }
-        project.client = req.body.client;
-      } else {
-        project.client = null;
-      }
+      project.client = req.body.client || null;
     }
 
-    // ✅ Site Manager validation
+    // Site manager
     if (req.body.site_manager !== undefined) {
-      if (!isAdmin(req.user.role)) {
-        return res.status(403).json({
-          success: false,
-          message: "Only admins can assign site manager",
-        });
-      }
-
-      if (req.body.site_manager) {
-        const siteManager = await User.findById(req.body.site_manager);
-        if (!siteManager) {
-          return res.status(404).json({
-            success: false,
-            message: "Site Manager not found",
-          });
-        }
-
-        if (siteManager.role !== "site_manager") {
-          return res.status(400).json({
-            success: false,
-            message: "Assigned site manager must have the 'site_manager' role",
-          });
-        }
-        project.site_manager = req.body.site_manager;
-      } else {
-        project.site_manager = null;
-      }
+      project.site_manager = req.body.site_manager || null;
     }
 
-    // ✅ Labour validation
+    // Labour
     if (req.body.labour !== undefined) {
-      if (!isAdmin(req.user.role)) {
-        return res.status(403).json({
-          success: false,
-          message: "Only admins can assign labour",
-        });
-      }
-
-      if (req.body.labour && req.body.labour.length > 0) {
-        const labourIds = Array.isArray(req.body.labour)
-          ? req.body.labour
-          : [req.body.labour];
-
-        const labourUsers = await User.find({
-          _id: { $in: labourIds },
-          role: "labour",
-        });
-
-        if (labourUsers.length !== labourIds.length) {
-          return res.status(400).json({
-            success: false,
-            message: "One or more users are not valid labour",
-          });
-        }
-        project.labour = labourIds;
-      } else {
-        project.labour = [];
-      }
+      project.labour = Array.isArray(req.body.labour)
+        ? req.body.labour
+        : [];
     }
 
-    // ✅ AttributeSet validation
+    // AttributeSet
     if (req.body.AttributeSet !== undefined) {
-      if (!isAdmin(req.user.role)) {
-        return res.status(403).json({
-          success: false,
-          message: "Only admins can update AttributeSet",
-        });
-      }
-
-      if (req.body.AttributeSet && req.body.AttributeSet.length > 0) {
-        const attributeSetIds = Array.isArray(req.body.AttributeSet)
-          ? req.body.AttributeSet
-          : [req.body.AttributeSet];
-
-        const attributeSetCount = await AttributeSet.countDocuments({
-          _id: { $in: attributeSetIds },
-        });
-
-        if (attributeSetCount !== attributeSetIds.length) {
-          return res.status(404).json({
-            success: false,
-            message: "One or more AttributeSets not found",
-          });
-        }
-        project.AttributeSet = attributeSetIds;
-      } else {
-        project.AttributeSet = [];
-      }
+      project.AttributeSet = Array.isArray(req.body.AttributeSet)
+        ? req.body.AttributeSet
+        : [];
     }
 
-    // ✅ Direct attributes validation - REPLACES entire attributes array
+    // Attributes
     if (req.body.attributes !== undefined) {
-      if (!isAdmin(req.user.role)) {
-        return res.status(403).json({
-          success: false,
-          message: "Only admins can update attributes",
-        });
-      }
-
-      if (req.body.attributes && req.body.attributes.length > 0) {
-        const validatedAttributes = [];
-
-        for (const item of req.body.attributes) {
-          if (!item.attribute || !item.quantity) {
-            return res.status(400).json({
-              success: false,
-              message: "Each attribute must have attribute ID and quantity",
-            });
-          }
-
-          if (item.quantity < 1) {
-            return res.status(400).json({
-              success: false,
-              message: "Quantity must be at least 1",
-            });
-          }
-
-          const attributeExists = await Attribute.findById(item.attribute);
-          if (!attributeExists) {
-            return res.status(404).json({
-              success: false,
-              message: `Attribute with ID ${item.attribute} not found`,
-            });
-          }
-
-          validatedAttributes.push({
-            attribute: item.attribute,
-            quantity: item.quantity,
-          });
-        }
-
-        project.attributes = validatedAttributes;
-      } else {
-        project.attributes = [];
-      }
-    }
-
-    // ✅ Phase validation
-    if (req.body.phases !== undefined) {
-      if (req.body.phases && req.body.phases.length > 0) {
-        const validPhases = req.body.phases.every((phase) =>
-          ["FOUNDATION", "STRUCTURE", "FINISHING", "HANDOVER"].includes(
-            phase.phaseName,
-          ),
-        );
-
-        if (!validPhases) {
-          return res.status(400).json({
-            success: false,
-            message:
-              "Invalid phase name. Must be one of: FOUNDATION, STRUCTURE, FINISHING, HANDOVER",
-          });
-        }
-
-        // Validate each phase has required fields
-        const phasesValid = req.body.phases.every(
-          (phase) =>
-            phase.hasOwnProperty("completionPercentage") &&
-            phase.hasOwnProperty("isCompleted"),
-        );
-
-        if (!phasesValid) {
-          return res.status(400).json({
-            success: false,
-            message:
-              "Each phase must have completionPercentage and isCompleted fields",
-          });
-        }
-
-        project.phases = req.body.phases;
-      } else {
-        project.phases = [];
-      }
-    }
-
-    // ✅ Documents validation
-    if (req.body.documents !== undefined) {
-      if (req.body.documents && req.body.documents.length > 0) {
-        // Validate each document has required fields
-        const documentsValid = req.body.documents.every(
-          (doc) => doc.name && doc.url,
-        );
-
-        if (!documentsValid) {
-          return res.status(400).json({
-            success: false,
-            message: "Each document must have name and url fields",
-          });
-        }
-        project.documents = req.body.documents;
-      } else {
-        project.documents = [];
-      }
-    }
-
-    // ✅ Location validation
-    if (req.body.location !== undefined) {
-      if (req.body.location) {
-        // Validate coordinates if provided
-        if (
-          req.body.location.coordinates &&
-          req.body.location.coordinates.coordinates
-        ) {
-          const coords = req.body.location.coordinates.coordinates;
-          if (!Array.isArray(coords) || coords.length !== 2) {
-            return res.status(400).json({
-              success: false,
-              message: "Coordinates must be an array of [longitude, latitude]",
-            });
-          }
-        }
-        project.location = req.body.location;
-      } else {
-        project.location = undefined;
-      }
+      project.attributes = Array.isArray(req.body.attributes)
+        ? req.body.attributes
+        : [];
     }
 
     /* ===============================
-       FIELD UPDATES (COMMON FIELDS)
+       PHASES
     =============================== */
+    if (req.body.phases !== undefined) {
+      project.phases = req.body.phases || [];
 
-    // Update basic fields
+      const total = project.phases.length;
+      const completed = project.phases.filter(p => p.isCompleted).length;
+
+      project.progressPercentage =
+        total > 0 ? Math.round((completed / total) * 100) : 0;
+
+      console.log("📊 Progress recalculated:", project.progressPercentage);
+    }
+
+    /* ===============================
+       LOCATION
+    =============================== */
+    if (req.body.location !== undefined) {
+      project.location = req.body.location || project.location;
+    }
+
+    /* ===============================
+       DOCUMENTS (FILTER EMPTY)
+    =============================== */
+    if (req.body.documents !== undefined) {
+      project.documents = (req.body.documents || []).filter(
+        d => d.name && d.url
+      );
+    }
+
+    /* ===============================
+       BASIC FIELDS
+    =============================== */
     const basicFields = [
       "projectName",
       "siteName",
       "area",
       "startDate",
       "expectedEndDate",
-      "extracost",
       "projectStatus",
       "approvalStatus",
     ];
 
     for (const field of basicFields) {
       if (req.body[field] !== undefined) {
-        // Special validation for dates
-        if (field === "expectedEndDate" && req.body.expectedEndDate) {
-          const startDate = req.body.startDate || project.startDate;
-          if (
-            startDate &&
-            new Date(req.body.expectedEndDate) < new Date(startDate)
-          ) {
-            return res.status(400).json({
-              success: false,
-              message: "End date must be after start date",
-            });
-          }
-        }
-
-        // Validation for area
-        if (field === "area" && req.body.area < 0) {
-          return res.status(400).json({
-            success: false,
-            message: "Area cannot be negative",
-          });
-        }
-
-        // Validation for extracost
-        if (field === "extracost" && req.body.extracost < 0) {
-          return res.status(400).json({
-            success: false,
-            message: "extracost cannot be negative",
-          });
-        }
-
         project[field] = req.body[field];
       }
     }
 
-    /* ===============================
-       AUTO PROGRESS & STATUS CALCULATION
-    =============================== */
-
-    // Recalculate progress if phases were updated
-    if (req.body.phases !== undefined) {
-      const total = project.phases.length;
-      const completed = project.phases.filter((p) => p.isCompleted).length;
-
-      project.progressPercentage =
-        total > 0 ? Math.round((completed / total) * 100) : 0;
-
-      // Update project status based on progress (only if not manually set)
-      if (req.body.projectStatus === undefined) {
-        if (project.progressPercentage === 0) {
-          project.projectStatus = "planning";
-        } else if (project.progressPercentage === 100) {
-          project.projectStatus = "completed";
-        } else if (
-          project.progressPercentage > 0 &&
-          project.progressPercentage < 100
-        ) {
-          project.projectStatus = "in_progress";
-        }
-      }
+    // 🔥 Fix: extraCost → extracost
+    if (req.body.extraCost !== undefined) {
+      project.extracost = req.body.extraCost;
     }
 
-    // Validate expectedEndDate against startDate if both are present
+    /* ===============================
+       DATE VALIDATION
+    =============================== */
     if (project.startDate && project.expectedEndDate) {
       if (new Date(project.expectedEndDate) < new Date(project.startDate)) {
         return res.status(400).json({
@@ -1195,12 +984,16 @@ export const updateProject = async (req, res) => {
     }
 
     await project.save();
+    console.log("💾 Project saved");
 
-    // ✅ Calculate totals for response (similar to getProjectById logic)
+    /* ===============================
+       AGGREGATION PIPELINE (FIXED)
+    =============================== */
+    console.log("🧮 Running aggregation pipeline");
+
     const pipeline = [
       { $match: { _id: project._id } },
-      
-      // Populate attribute sets with their attributes
+
       {
         $lookup: {
           from: "attributesets",
@@ -1213,119 +1006,50 @@ export const updateProject = async (req, res) => {
                 from: "attributes",
                 localField: "attributes",
                 foreignField: "_id",
-                as: "populatedAttributes",
-              }
+                as: "attributes",
+              },
             },
-            {
-              $addFields: {
-                attributes: "$populatedAttributes"
-              }
-            }
-          ]
-        }
+          ],
+        },
       },
-      
-      // Populate direct attributes
-      {
-        $lookup: {
-          from: "attributes",
-          localField: "attributes.attribute",
-          foreignField: "_id",
-          as: "directAttributeDetails",
-        }
-      },
-      
-      // Calculate totals
+
       {
         $addFields: {
-          // Total from attribute sets
           attributeSetTotal: {
             $sum: {
-              $reduce: {
-                input: "$attributeSets",
-                initialValue: [],
-                in: { $concatArrays: ["$$value", "$$this.attributes"] }
-              }
-            }
-          },
-          
-          // Create map for direct attributes
-          directAttributeMap: {
-            $arrayToObject: {
               $map: {
-                input: "$directAttributeDetails",
+                input: {
+                  $reduce: {
+                    input: "$attributeSets",
+                    initialValue: [],
+                    in: { $concatArrays: ["$$value", "$$this.attributes"] },
+                  },
+                },
                 as: "attr",
-                in: {
-                  k: { $toString: "$$attr._id" },
-                  v: "$$attr"
-                }
-              }
-            }
-          }
-        }
+                in: { $ifNull: ["$$attr.pricing", 0] },
+              },
+            },
+          },
+        },
       },
-      
+
       {
         $addFields: {
-          // Recalculate attribute set total with pricing
-          calculatedSetTotal: {
-            $sum: {
-              $map: {
-                input: { $ifNull: ["$attributeSetTotal", []] },
-                as: "attr",
-                in: { $ifNull: ["$$attr.pricing", 0] }
-              }
-            }
-          },
-          
-          // Calculate direct attributes total with quantities
-          calculatedDirectTotal: {
-            $sum: {
-              $map: {
-                input: "$attributes",
-                as: "item",
-                in: {
-                  $multiply: [
-                    { $ifNull: ["$$item.quantity", 1] },
-                    { 
-                      $ifNull: [
-                        { $getField: { 
-                          field: { $toString: "$$item.attribute" }, 
-                          input: "$directAttributeMap.pricing" 
-                        }}, 
-                        0 
-                      ]
-                    }
-                  ]
-                }
-              }
-            }
-          }
-        }
-      },
-      
-      {
-        $addFields: {
-          projectTotal: {
-            $add: [
-              { $ifNull: ["$calculatedSetTotal", 0] },
-              { $ifNull: ["$calculatedDirectTotal", 0] }
-            ]
-          },
           finalProjectTotal: {
             $add: [
-              { $ifNull: ["$calculatedSetTotal", 0] },
-              { $ifNull: ["$calculatedDirectTotal", 0] },
-              { $ifNull: ["$extracost", 0] }
-            ]
-          }
-        }
-      }
+              { $ifNull: ["$attributeSetTotal", 0] },
+              { $ifNull: ["$extracost", 0] },
+            ],
+          },
+        },
+      },
     ];
 
     const [projectWithTotals] = await Project.aggregate(pipeline);
 
-    // Populate response with user details
+    /* ===============================
+       POPULATE RESPONSE
+    =============================== */
     const populatedProject = await Project.findById(project._id)
       .populate("client", "name email phoneNumber")
       .populate("site_manager", "name email phoneNumber")
@@ -1338,20 +1062,18 @@ export const updateProject = async (req, res) => {
         select: "label type unit pricing",
       });
 
-    // Merge the totals with populated project
-    const responseData = {
-      ...populatedProject.toObject(),
-      projectTotal: projectWithTotals?.projectTotal || 0,
-      finalProjectTotal: projectWithTotals?.finalProjectTotal || 0,
-      attributeSets: projectWithTotals?.attributeSets || []
-    };
+    console.log("✅ Response ready");
 
     return res.json({
       success: true,
-      data: responseData,
+      data: {
+        ...populatedProject.toObject(),
+        projectTotal: projectWithTotals?.attributeSetTotal || 0,
+        finalProjectTotal: projectWithTotals?.finalProjectTotal || 0,
+      },
     });
   } catch (error) {
-    console.error("Update Project Error:", error);
+    console.error("🔥 Update Project Error:", error);
     return res.status(500).json({
       success: false,
       message: error.message,
