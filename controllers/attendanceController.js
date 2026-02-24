@@ -227,7 +227,6 @@ export const getTodayAttendanceStatus = async (req, res) => {
       success: true,
       status: "not-marked",
     });
-
   } catch (error) {
     console.error("Today Attendance Status Error:", error);
     res.status(500).json({
@@ -404,7 +403,7 @@ export const getProjectTimeline = async (req, res) => {
 export const adminAddAttendanceForLabour = async (req, res) => {
   try {
     const {
-      labourId,
+      userId,
       projectId,
       attendanceType,
       selfieImage,
@@ -413,16 +412,19 @@ export const adminAddAttendanceForLabour = async (req, res) => {
     } = req.body;
 
     // 🔐 Auth + Role
-    if (!req.user || req.user.role !== "super_admin") {
+    if (
+      !req.user ||
+      !["site_manager", "labour"].includes(req.user.role)
+    ) {
       return res.status(403).json({
         success: false,
-        message: "Only super admin can add attendance",
+        message: "Only site manager or labour can mark attendance",
       });
     }
 
     // ✅ Validation
     if (
-      !labourId ||
+      !userId ||
       !projectId ||
       !attendanceType ||
       !selfieImage ||
@@ -448,30 +450,26 @@ export const adminAddAttendanceForLabour = async (req, res) => {
       });
     }
 
-    // 🔍 Find attendance document
     let attendanceDoc = await Attendance.findOne({
-      user: labourId,
+      user: userId,
       project: projectId,
     });
 
     if (!attendanceDoc) {
       attendanceDoc = await Attendance.create({
-        user: labourId,
+        user: userId,
         project: projectId,
         history: [],
       });
     }
 
-    // 🔎 Last entry
-    const lastEntry =
-      attendanceDoc.history[attendanceDoc.history.length - 1];
+    const lastEntry = attendanceDoc.history[attendanceDoc.history.length - 1];
 
-    // 🧠 AUTO-FIX LOGIC (ADMIN OVERRIDE)
+    // 🧠 AUTO-FIX LOGIC
     if (
       attendanceType === "check-in" &&
       lastEntry?.attendanceType === "check-in"
     ) {
-      // Auto checkout previous session
       attendanceDoc.history.push({
         attendanceType: "check-out",
         selfieImage: "admin-auto-checkout",
@@ -482,7 +480,6 @@ export const adminAddAttendanceForLabour = async (req, res) => {
       });
     }
 
-    // ✅ PUSH ADMIN ENTRY
     attendanceDoc.history.push({
       attendanceType,
       selfieImage,
@@ -499,11 +496,11 @@ export const adminAddAttendanceForLabour = async (req, res) => {
 
     return res.status(201).json({
       success: true,
-      message: "Attendance added by admin successfully",
+      message: "Attendance added successfully",
       history: attendanceDoc.history,
     });
   } catch (error) {
-    console.error("Admin Add Attendance Error:", error);
+    console.error("Add Attendance Error:", error);
     res.status(500).json({
       success: false,
       message: error.message,
@@ -511,4 +508,46 @@ export const adminAddAttendanceForLabour = async (req, res) => {
   }
 };
 
+export const deleteAttendanceRecord = async (req, res) => {
+  try {
+    const { attendanceId, historyIndex } = req.body;
 
+    if (!req.user || req.user.role !== "super_admin") {
+      return res.status(403).json({
+        success: false,
+        message: "Only super admin can delete attendance records",
+      });
+    }
+
+    const attendance = await Attendance.findById(attendanceId);
+    if (!attendance) {
+      return res.status(404).json({ message: "Not found" });
+    }
+
+    if (
+      !attendance.history ||
+      historyIndex < 0 ||
+      historyIndex >= attendance.history.length
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid history index",
+      });
+    }
+
+    // 🗑️ DELETE ENTRY
+    attendance.history.splice(historyIndex, 1);
+    await attendance.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Attendance record deleted successfully",
+    });
+  } catch (error) {
+    console.error("Delete Attendance Error:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};

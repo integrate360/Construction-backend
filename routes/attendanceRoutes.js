@@ -12,6 +12,7 @@ import {
   getProjectTimeline,
   adminEditAttendance,
   adminAddAttendanceForLabour,
+  deleteAttendanceRecord,
 } from "../controllers/attendanceController.js";
 
 const router = express.Router();
@@ -23,11 +24,8 @@ router.get("/status", authMiddleware, getAttendanceStatus);
 router.get("/monthly-summary", authMiddleware, getMonthlySummary);
 router.get("/project/:projectId", authMiddleware, getProjectAttendance);
 router.get("/project/:projectId/timeline", authMiddleware, getProjectTimeline);
+router.delete("/delete-history", authMiddleware, deleteAttendanceRecord);
 router.put("/admin/edit", authMiddleware, adminEditAttendance);
-router.post(
-  "/admin/add",
-  authMiddleware,
-  adminAddAttendanceForLabour
-);
+router.post("/admin/add", authMiddleware, adminAddAttendanceForLabour);
 
 export default router;
