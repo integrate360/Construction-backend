@@ -30,7 +30,7 @@ const historySchema = new mongoose.Schema(
       default: Date.now,
     },
   },
-  { _id: true } // Changed from false to true to enable automatic IDs
+  { _id: true } 
 );
 
 const attendanceSchema = new mongoose.Schema(
