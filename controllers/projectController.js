@@ -1682,3 +1682,46 @@ export const removeProjectAttribute = async (req, res) => {
     });
   }
 };
+
+export const getProjectTeamByProjectId = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+
+    if (!projectId) {
+      return res.status(400).json({
+        success: false,
+        message: "Project ID is required",
+      });
+    }
+
+    const project = await Project.findById(projectId)
+      .populate("site_manager", "name email phoneNumber role profilePicture")
+      .populate("labour", "name email phoneNumber role profilePicture")
+      .select("projectName siteName site_manager labour");
+
+    if (!project) {
+      return res.status(404).json({
+        success: false,
+        message: "Project not found",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: {
+        projectId: project._id,
+        projectName: project.projectName,
+        siteName: project.siteName,
+        site_manager: project.site_manager,
+        labour: project.labour,
+        labourCount: project.labour.length,
+      },
+    });
+  } catch (error) {
+    console.error("Get Project Team Error:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};

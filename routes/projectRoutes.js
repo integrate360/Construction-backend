@@ -10,6 +10,7 @@ import {
   addProjectAttributes,
   updateAttributeQuantity,
   removeProjectAttribute,
+  getProjectTeamByProjectId,
 } from "../controllers/projectController.js";
 
 const router = express.Router();
@@ -25,7 +26,6 @@ router.delete("/deleteProject/:id", deleteProject);
 router.post("/addProjectAttributes/:id", addProjectAttributes);
 router.put("/updateAttributeQuantity/:projectId/:attributeId", updateAttributeQuantity);
 router.delete("/removeProjectAttribute/:projectId/:attributeId", removeProjectAttribute);
-
-
+router.get("/getProjectTeam/:projectId", getProjectTeamByProjectId);
 
 export default router;
