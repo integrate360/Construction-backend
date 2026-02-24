@@ -1,15 +1,15 @@
 import express from "express";
 import authMiddleware from "../middleware/authmiddleware.js";
 import {
-  createProject,
   getProjects,
-  getProjectById,
   updateProject,
   deleteProject,
+  createProject,
+  getProjectById,
   getProjectStats,
   addProjectAttributes,
-  updateAttributeQuantity,
   removeProjectAttribute,
+  updateAttributeQuantity,
   getProjectTeamByProjectId,
 } from "../controllers/projectController.js";
 
@@ -24,8 +24,14 @@ router.get("/getProjectStats/stats", getProjectStats);
 router.get("/getProjectById/:id", getProjectById);
 router.delete("/deleteProject/:id", deleteProject);
 router.post("/addProjectAttributes/:id", addProjectAttributes);
-router.put("/updateAttributeQuantity/:projectId/:attributeId", updateAttributeQuantity);
-router.delete("/removeProjectAttribute/:projectId/:attributeId", removeProjectAttribute);
+router.put(
+  "/updateAttributeQuantity/:projectId/:attributeId",
+  updateAttributeQuantity,
+);
+router.delete(
+  "/removeProjectAttribute/:projectId/:attributeId",
+  removeProjectAttribute,
+);
 router.get("/getProjectTeam/:projectId", getProjectTeamByProjectId);
 
 export default router;

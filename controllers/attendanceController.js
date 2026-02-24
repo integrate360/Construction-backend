@@ -442,18 +442,19 @@ export const getProjectTimeline = async (req, res) => {
   }
 };
 
+
+
 export const adminAddAttendanceForUser = async (req, res) => {
   try {
     const {
-      userId, // renamed from labourId
-      projectId,
+      userId,
       attendanceType,
       selfieImage,
       coordinates,
       createdAt,
     } = req.body;
 
-    // SUPER ADMIN CHECK
+    // 🔐 SUPER ADMIN CHECK
     if (!req.user || req.user.role !== "super_admin") {
       return res.status(403).json({
         success: false,
@@ -461,8 +462,8 @@ export const adminAddAttendanceForUser = async (req, res) => {
       });
     }
 
-    // BASIC VALIDATION
-    if (!userId || !projectId || !attendanceType || !selfieImage || !coordinates) {
+    // ✅ BASIC VALIDATION
+    if (!userId || !attendanceType || !selfieImage || !coordinates) {
       return res.status(400).json({
         success: false,
         message: "All fields are required",
@@ -483,28 +484,29 @@ export const adminAddAttendanceForUser = async (req, res) => {
       });
     }
 
-    // 🔍 Check if project exists
-    const project = await Project.findById(projectId);
+    // 🔍 FIND PROJECT AUTOMATICALLY
+    const project = await Project.findOne({
+      $or: [
+        { site_manager: userId },
+        { labour: userId },
+      ],
+      projectStatus: { $ne: "completed" }, // optional safety
+    });
+
     if (!project) {
       return res.status(404).json({
         success: false,
-        message: "Project not found",
+        message: "No active project found for this user",
       });
     }
 
-    // 🔍 Check if user belongs to this project
-    const isUserSiteManager = project.site_manager?.toString() === userId;
-    const isUserLabour = project.labour?.some(id => id.toString() === userId);
+    const projectId = project._id;
 
-    if (!isUserSiteManager && !isUserLabour) {
-      return res.status(401).json({
-        success: false,
-        message: "User is not associated with this project",
-      });
-    }
-
-    // 🔍 Find or create attendance document
-    let attendanceDoc = await Attendance.findOne({ user: userId, project: projectId });
+    // 🔍 FIND OR CREATE ATTENDANCE DOC
+    let attendanceDoc = await Attendance.findOne({
+      user: userId,
+      project: projectId,
+    });
 
     if (!attendanceDoc) {
       attendanceDoc = await Attendance.create({
@@ -514,17 +516,17 @@ export const adminAddAttendanceForUser = async (req, res) => {
       });
     }
 
-    // LAST ENTRY
-    const lastEntry = attendanceDoc.history[attendanceDoc.history.length - 1];
+    const lastEntry =
+      attendanceDoc.history[attendanceDoc.history.length - 1];
 
-    // ⛔ AUTO FIX: If duplicate check-in
+    // 🧠 AUTO FIX (ADMIN OVERRIDE)
     if (
       attendanceType === "check-in" &&
       lastEntry?.attendanceType === "check-in"
     ) {
       attendanceDoc.history.push({
         attendanceType: "check-out",
-        selfieImage: "auto-checkout-by-admin",
+        selfieImage: "admin-auto-checkout",
         location: lastEntry.location,
         createdAt: createdAt ? new Date(createdAt) : new Date(),
         editedByAdmin: true,
@@ -532,7 +534,7 @@ export const adminAddAttendanceForUser = async (req, res) => {
       });
     }
 
-    // ✔ ADD ADMIN-ADDED ENTRY
+    // ✅ ADD ENTRY
     attendanceDoc.history.push({
       attendanceType,
       selfieImage,
@@ -550,6 +552,10 @@ export const adminAddAttendanceForUser = async (req, res) => {
     return res.status(201).json({
       success: true,
       message: "Attendance added successfully by admin",
+      project: {
+        id: project._id,
+        name: project.projectName,
+      },
       history: attendanceDoc.history,
     });
   } catch (error) {
