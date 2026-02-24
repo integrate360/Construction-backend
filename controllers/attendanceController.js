@@ -569,7 +569,7 @@ export const adminAddAttendanceForUser = async (req, res) => {
 
 export const deleteAttendanceRecord = async (req, res) => {
   try {
-    const { attendanceId, historyIndex } = req.body;
+    const { attendanceId, historyIndex } = req.body; // Now using historyIndex instead of index
 
     if (!req.user || req.user.role !== "super_admin") {
       return res.status(403).json({
@@ -580,27 +580,30 @@ export const deleteAttendanceRecord = async (req, res) => {
 
     const attendance = await Attendance.findById(attendanceId);
     if (!attendance) {
-      return res.status(404).json({ message: "Not found" });
-    }
-
-    if (
-      !attendance.history ||
-      historyIndex < 0 ||
-      historyIndex >= attendance.history.length
-    ) {
-      return res.status(400).json({
+      return res.status(404).json({ 
         success: false,
-        message: "Invalid history index",
+        message: "Attendance record not found" 
       });
     }
 
-    // 🗑️ DELETE ENTRY
-    attendance.history.splice(historyIndex, 1);
+    // Find the history entry by its _id using Mongoose's .id() method
+    const historyEntry = attendance.history.id(historyIndex);
+    
+    if (!historyEntry) {
+      return res.status(404).json({
+        success: false,
+        message: "History entry not found",
+      });
+    }
+
+    // Remove the entry using pull
+    attendance.history.pull({ _id: historyIndex });
     await attendance.save();
 
     return res.status(200).json({
       success: true,
       message: "Attendance record deleted successfully",
+      deletedEntry: historyEntry // Optional: return the deleted entry
     });
   } catch (error) {
     console.error("Delete Attendance Error:", error);

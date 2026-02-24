@@ -839,7 +839,6 @@ export const updateProject = async (req, res) => {
        ROLE CHECK
     =============================== */
     if (["client", "labour"].includes(req.user.role)) {
-      console.log("❌ Role not allowed:", req.user.role);
       return res.status(403).json({
         success: false,
         message: "You do not have permission to update projects",
@@ -847,37 +846,26 @@ export const updateProject = async (req, res) => {
     }
 
     /* ===============================
-       PROJECT FETCH
+       FETCH PROJECT
     =============================== */
     const project = await Project.findById(req.params.id);
     if (!project) {
-      console.log("❌ Project not found");
       return res.status(404).json({
         success: false,
         message: "Project not found",
       });
     }
 
-    console.log("✅ Project found:", project._id);
-
-    /* ===============================
-       ACCESS CONTROL
-    =============================== */
     if (!canAccessProject(req.user, project)) {
-      console.log("❌ Access denied");
       return res.status(403).json({
         success: false,
         message: "Not authorized to update this project",
       });
     }
 
-    console.log("✅ Access granted");
-
     /* ===============================
-       ADMIN ONLY UPDATES
+       ADMIN CONTROLLED FIELDS
     =============================== */
-
-    // Client
     if (req.body.client !== undefined) {
       if (!isAdmin(req.user.role)) {
         return res.status(403).json({
@@ -888,26 +876,20 @@ export const updateProject = async (req, res) => {
       project.client = req.body.client || null;
     }
 
-    // Site manager
     if (req.body.site_manager !== undefined) {
       project.site_manager = req.body.site_manager || null;
     }
 
-    // Labour
     if (req.body.labour !== undefined) {
-      project.labour = Array.isArray(req.body.labour)
-        ? req.body.labour
-        : [];
+      project.labour = Array.isArray(req.body.labour) ? req.body.labour : [];
     }
 
-    // AttributeSet
     if (req.body.AttributeSet !== undefined) {
       project.AttributeSet = Array.isArray(req.body.AttributeSet)
         ? req.body.AttributeSet
         : [];
     }
 
-    // Attributes
     if (req.body.attributes !== undefined) {
       project.attributes = Array.isArray(req.body.attributes)
         ? req.body.attributes
@@ -915,7 +897,7 @@ export const updateProject = async (req, res) => {
     }
 
     /* ===============================
-       PHASES
+       PHASES & PROGRESS
     =============================== */
     if (req.body.phases !== undefined) {
       project.phases = req.body.phases || [];
@@ -933,11 +915,11 @@ export const updateProject = async (req, res) => {
        LOCATION
     =============================== */
     if (req.body.location !== undefined) {
-      project.location = req.body.location || project.location;
+      project.location = req.body.location;
     }
 
     /* ===============================
-       DOCUMENTS (FILTER EMPTY)
+       DOCUMENTS
     =============================== */
     if (req.body.documents !== undefined) {
       project.documents = (req.body.documents || []).filter(
@@ -946,7 +928,7 @@ export const updateProject = async (req, res) => {
     }
 
     /* ===============================
-       BASIC FIELDS
+       BASIC FIELDS (FIXED)
     =============================== */
     const basicFields = [
       "projectName",
@@ -955,16 +937,20 @@ export const updateProject = async (req, res) => {
       "startDate",
       "expectedEndDate",
       "projectStatus",
+      "siteStatus",
       "approvalStatus",
     ];
 
     for (const field of basicFields) {
       if (req.body[field] !== undefined) {
+        console.log(`✏️ Updating ${field}:`, req.body[field]);
         project[field] = req.body[field];
       }
     }
 
-    // 🔥 Fix: extraCost → extracost
+    /* ===============================
+       EXTRA COST
+    =============================== */
     if (req.body.extraCost !== undefined) {
       project.extracost = req.body.extraCost;
     }
@@ -981,17 +967,17 @@ export const updateProject = async (req, res) => {
       }
     }
 
+    /* ===============================
+       SAVE
+    =============================== */
     await project.save();
-    console.log("💾 Project saved");
+    console.log("💾 Project saved with status:", project.projectStatus);
 
     /* ===============================
-       AGGREGATION PIPELINE (FIXED)
+       AGGREGATION
     =============================== */
-    console.log("🧮 Running aggregation pipeline");
-
     const pipeline = [
       { $match: { _id: project._id } },
-
       {
         $lookup: {
           from: "attributesets",
@@ -1010,7 +996,6 @@ export const updateProject = async (req, res) => {
           ],
         },
       },
-
       {
         $addFields: {
           attributeSetTotal: {
@@ -1030,7 +1015,6 @@ export const updateProject = async (req, res) => {
           },
         },
       },
-
       {
         $addFields: {
           finalProjectTotal: {
@@ -1046,7 +1030,7 @@ export const updateProject = async (req, res) => {
     const [projectWithTotals] = await Project.aggregate(pipeline);
 
     /* ===============================
-       POPULATE RESPONSE
+       RESPONSE
     =============================== */
     const populatedProject = await Project.findById(project._id)
       .populate("client", "name email phoneNumber")
@@ -1056,11 +1040,8 @@ export const updateProject = async (req, res) => {
       .populate("AttributeSet")
       .populate({
         path: "attributes.attribute",
-        model: "Attribute",
         select: "label type unit pricing",
       });
-
-    console.log("✅ Response ready");
 
     return res.json({
       success: true,
