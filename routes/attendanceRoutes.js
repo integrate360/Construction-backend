@@ -11,7 +11,7 @@ import {
   getProjectAttendance,
   getProjectTimeline,
   adminEditAttendance,
-  adminAddAttendanceForLabour,
+  adminAddAttendanceForUser,
   deleteAttendanceRecord,
 } from "../controllers/attendanceController.js";
 
@@ -26,6 +26,6 @@ router.get("/project/:projectId", authMiddleware, getProjectAttendance);
 router.get("/project/:projectId/timeline", authMiddleware, getProjectTimeline);
 router.delete("/delete-history", authMiddleware, deleteAttendanceRecord);
 router.put("/admin/edit", authMiddleware, adminEditAttendance);
-router.post("/admin/add", authMiddleware, adminAddAttendanceForLabour);
+router.post("/admin/add", authMiddleware, adminAddAttendanceForUser);
 
 export default router;

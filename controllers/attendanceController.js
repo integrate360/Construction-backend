@@ -308,7 +308,15 @@ export const adminEditAttendance = async (req, res) => {
   try {
     const { attendanceId, historyIndex, attendanceType } = req.body;
 
-    // Validate type
+    // SUPER ADMIN CHECK
+    if (!req.user || req.user.role !== "super_admin") {
+      return res.status(403).json({
+        success: false,
+        message: "Only super admin can edit attendance",
+      });
+    }
+
+    // Validate attendance type
     if (!["check-in", "check-out"].includes(attendanceType)) {
       return res.status(400).json({
         success: false,
@@ -316,12 +324,40 @@ export const adminEditAttendance = async (req, res) => {
       });
     }
 
-    const attendance = await Attendance.findById(attendanceId);
+    // FIND ATTENDANCE DOCUMENT
+    const attendance = await Attendance.findById(attendanceId)
+      .populate("project")
+      .populate("user");
+
     if (!attendance) {
-      return res.status(404).json({ message: "Not found" });
+      return res.status(404).json({
+        success: false,
+        message: "Attendance record not found",
+      });
     }
 
-    // 🔴 IMPORTANT CHECK
+    const project = attendance.project;
+    const userId = attendance.user?._id?.toString();
+
+    if (!project || !userId) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid attendance record",
+      });
+    }
+
+    // CHECK IF USER BELONGS TO THIS PROJECT
+    const isUserSiteManager = project.site_manager?.toString() === userId;
+    const isUserLabour = project.labour?.some(id => id.toString() === userId);
+
+    if (!isUserSiteManager && !isUserLabour) {
+      return res.status(401).json({
+        success: false,
+        message: "User is not associated with this project",
+      });
+    }
+
+    // HISTORY INDEX VALIDATION
     if (
       !attendance.history ||
       historyIndex < 0 ||
@@ -333,18 +369,24 @@ export const adminEditAttendance = async (req, res) => {
       });
     }
 
+    // APPLY EDIT
     attendance.history[historyIndex].attendanceType = attendanceType;
     attendance.history[historyIndex].editedByAdmin = true;
     attendance.history[historyIndex].editedAt = new Date();
 
     await attendance.save();
 
-    res.json({
+    return res.json({
       success: true,
-      message: "Attendance corrected",
+      message: "Attendance updated successfully",
+      history: attendance.history,
     });
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    console.error("Admin Edit Attendance Error:", err);
+    return res.status(500).json({
+      success: false,
+      message: err.message,
+    });
   }
 };
 
@@ -400,10 +442,10 @@ export const getProjectTimeline = async (req, res) => {
   }
 };
 
-export const adminAddAttendanceForLabour = async (req, res) => {
+export const adminAddAttendanceForUser = async (req, res) => {
   try {
     const {
-      labourId,
+      userId, // renamed from labourId
       projectId,
       attendanceType,
       selfieImage,
@@ -411,7 +453,7 @@ export const adminAddAttendanceForLabour = async (req, res) => {
       createdAt,
     } = req.body;
 
-    // 🔐 Auth + Role
+    // SUPER ADMIN CHECK
     if (!req.user || req.user.role !== "super_admin") {
       return res.status(403).json({
         success: false,
@@ -419,14 +461,8 @@ export const adminAddAttendanceForLabour = async (req, res) => {
       });
     }
 
-    // ✅ Validation
-    if (
-      !labourId ||
-      !projectId ||
-      !attendanceType ||
-      !selfieImage ||
-      !coordinates
-    ) {
+    // BASIC VALIDATION
+    if (!userId || !projectId || !attendanceType || !selfieImage || !coordinates) {
       return res.status(400).json({
         success: false,
         message: "All fields are required",
@@ -447,32 +483,48 @@ export const adminAddAttendanceForLabour = async (req, res) => {
       });
     }
 
-    // 🔍 Find attendance document
-    let attendanceDoc = await Attendance.findOne({
-      user: labourId,
-      project: projectId,
-    });
+    // 🔍 Check if project exists
+    const project = await Project.findById(projectId);
+    if (!project) {
+      return res.status(404).json({
+        success: false,
+        message: "Project not found",
+      });
+    }
+
+    // 🔍 Check if user belongs to this project
+    const isUserSiteManager = project.site_manager?.toString() === userId;
+    const isUserLabour = project.labour?.some(id => id.toString() === userId);
+
+    if (!isUserSiteManager && !isUserLabour) {
+      return res.status(401).json({
+        success: false,
+        message: "User is not associated with this project",
+      });
+    }
+
+    // 🔍 Find or create attendance document
+    let attendanceDoc = await Attendance.findOne({ user: userId, project: projectId });
 
     if (!attendanceDoc) {
       attendanceDoc = await Attendance.create({
-        user: labourId,
+        user: userId,
         project: projectId,
         history: [],
       });
     }
 
-    // 🔎 Last entry
+    // LAST ENTRY
     const lastEntry = attendanceDoc.history[attendanceDoc.history.length - 1];
 
-    // 🧠 AUTO-FIX LOGIC (ADMIN OVERRIDE)
+    // ⛔ AUTO FIX: If duplicate check-in
     if (
       attendanceType === "check-in" &&
       lastEntry?.attendanceType === "check-in"
     ) {
-      // Auto checkout previous session
       attendanceDoc.history.push({
         attendanceType: "check-out",
-        selfieImage: "admin-auto-checkout",
+        selfieImage: "auto-checkout-by-admin",
         location: lastEntry.location,
         createdAt: createdAt ? new Date(createdAt) : new Date(),
         editedByAdmin: true,
@@ -480,7 +532,7 @@ export const adminAddAttendanceForLabour = async (req, res) => {
       });
     }
 
-    // ✅ PUSH ADMIN ENTRY
+    // ✔ ADD ADMIN-ADDED ENTRY
     attendanceDoc.history.push({
       attendanceType,
       selfieImage,
@@ -497,12 +549,12 @@ export const adminAddAttendanceForLabour = async (req, res) => {
 
     return res.status(201).json({
       success: true,
-      message: "Attendance added by admin successfully",
+      message: "Attendance added successfully by admin",
       history: attendanceDoc.history,
     });
   } catch (error) {
     console.error("Admin Add Attendance Error:", error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: error.message,
     });
