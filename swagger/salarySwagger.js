@@ -7,7 +7,7 @@
  *     description: Generate and manage payroll records
  *   - name: Advances
  *     description: Manage salary advances for users
- * 
+ *
  * components:
  *   securitySchemes:
  *     bearerAuth:
@@ -15,19 +15,61 @@
  *       scheme: bearer
  *       bearerFormat: JWT
  *       description: Enter JWT token in format "Bearer {token}"
- * 
+ *
  *   schemas:
  *     // ==================== SALARY STRUCTURE SCHEMAS ====================
  *     SalaryType:
  *       type: string
  *       enum: [daily, monthly, hourly]
  *       description: Type of salary calculation
- * 
+ *
  *     UserRole:
  *       type: string
  *       enum: [site_manager, labour]
  *       description: User role in project
- * 
+ *
+ *     UserInfo:
+ *       type: object
+ *       properties:
+ *         _id:
+ *           type: string
+ *           example: "507f1f77bcf86cd799439012"
+ *         name:
+ *           type: string
+ *           example: "John Doe"
+ *         email:
+ *           type: string
+ *           example: "john@example.com"
+ *         role:
+ *           type: string
+ *           example: "labour"
+ *         phoneNumber:
+ *           type: string
+ *           example: "+919876543210"
+ *         profilePicture:
+ *           type: string
+ *           example: "https://example.com/profile.jpg"
+ *         adharNumber:
+ *           type: string
+ *           example: "1234-5678-9012"
+ *
+ *     ProjectInfo:
+ *       type: object
+ *       properties:
+ *         _id:
+ *           type: string
+ *           example: "507f1f77bcf86cd799439013"
+ *         projectName:
+ *           type: string
+ *           example: "Greenfield Towers"
+ *         siteName:
+ *           type: string
+ *           example: "Greenfield Construction Site"
+ *         location:
+ *           type: object
+ *         client:
+ *           type: object
+ *
  *     SalaryStructure:
  *       type: object
  *       properties:
@@ -35,35 +77,9 @@
  *           type: string
  *           example: "507f1f77bcf86cd799439011"
  *         user:
- *           type: object
- *           properties:
- *             _id:
- *               type: string
- *             name:
- *               type: string
- *             email:
- *               type: string
- *             role:
- *               type: string
- *             phoneNumber:
- *               type: string
- *             profilePicture:
- *               type: string
- *             adharNumber:
- *               type: string
+ *           $ref: '#/components/schemas/UserInfo'
  *         project:
- *           type: object
- *           properties:
- *             _id:
- *               type: string
- *             projectName:
- *               type: string
- *             siteName:
- *               type: string
- *             location:
- *               type: object
- *             client:
- *               type: object
+ *           $ref: '#/components/schemas/ProjectInfo'
  *         role:
  *           $ref: '#/components/schemas/UserRole'
  *         salaryType:
@@ -103,7 +119,7 @@
  *         updatedAt:
  *           type: string
  *           format: date-time
- * 
+ *
  *     SalaryStructureInput:
  *       type: object
  *       required:
@@ -139,24 +155,24 @@
  *         effectiveTo:
  *           type: string
  *           format: date-time
- * 
+ *
  *     // ==================== PAYROLL SCHEMAS ====================
  *     AllowanceReason:
  *       type: string
  *       enum: [bonus, travel, food, overtime, other]
- * 
+ *
  *     DeductionReason:
  *       type: string
  *       enum: [absence, advance_recovery, penalty, other]
- * 
+ *
  *     PaymentMode:
  *       type: string
  *       enum: [cash, bank_transfer, upi, cheque]
- * 
+ *
  *     PaymentStatus:
  *       type: string
  *       enum: [pending, partially_paid, paid]
- * 
+ *
  *     Allowance:
  *       type: object
  *       properties:
@@ -169,7 +185,7 @@
  *         note:
  *           type: string
  *           example: "Performance bonus"
- * 
+ *
  *     Deduction:
  *       type: object
  *       properties:
@@ -182,33 +198,39 @@
  *         note:
  *           type: string
  *           example: "Absent on 15th Jan"
- * 
+ *
+ *     SalaryStructureInfo:
+ *       type: object
+ *       properties:
+ *         _id:
+ *           type: string
+ *         salaryType:
+ *           $ref: '#/components/schemas/SalaryType'
+ *         rateAmount:
+ *           type: number
+ *
  *     Payroll:
  *       type: object
  *       properties:
  *         _id:
  *           type: string
+ *           example: "507f1f77bcf86cd799439020"
  *         user:
- *           $ref: '#/components/schemas/SalaryStructure/properties/user'
+ *           $ref: '#/components/schemas/UserInfo'
  *         project:
- *           $ref: '#/components/schemas/SalaryStructure/properties/project'
+ *           $ref: '#/components/schemas/ProjectInfo'
  *         salaryStructure:
- *           type: object
- *           properties:
- *             _id:
- *               type: string
- *             salaryType:
- *               type: string
- *             rateAmount:
- *               type: number
+ *           $ref: '#/components/schemas/SalaryStructureInfo'
  *         role:
  *           $ref: '#/components/schemas/UserRole'
  *         periodStart:
  *           type: string
  *           format: date
+ *           example: "2024-01-01"
  *         periodEnd:
  *           type: string
  *           format: date
+ *           example: "2024-01-31"
  *         totalWorkingDays:
  *           type: number
  *           example: 26
@@ -262,17 +284,26 @@
  *           $ref: '#/components/schemas/PaymentMode'
  *         transactionReference:
  *           type: string
+ *           example: "UPI123456789"
  *         remarks:
  *           type: string
+ *           example: "January salary"
  *         createdBy:
  *           type: object
+ *           properties:
+ *             _id:
+ *               type: string
+ *             name:
+ *               type: string
+ *             email:
+ *               type: string
  *         createdAt:
  *           type: string
  *           format: date-time
  *         updatedAt:
  *           type: string
  *           format: date-time
- * 
+ *
  *     PayrollInput:
  *       type: object
  *       required:
@@ -308,7 +339,7 @@
  *           example: 5
  *         remarks:
  *           type: string
- * 
+ *
  *     BulkPayrollInput:
  *       type: object
  *       required:
@@ -335,7 +366,7 @@
  *           type: array
  *           items:
  *             $ref: '#/components/schemas/Deduction'
- * 
+ *
  *     MarkAsPaidInput:
  *       type: object
  *       required:
@@ -349,21 +380,22 @@
  *         paymentDate:
  *           type: string
  *           format: date-time
- * 
+ *
  *     // ==================== ADVANCE SCHEMAS ====================
  *     RecoveryStatus:
  *       type: string
  *       enum: [pending, partially_recovered, recovered]
- * 
+ *
  *     Advance:
  *       type: object
  *       properties:
  *         _id:
  *           type: string
+ *           example: "507f1f77bcf86cd799439030"
  *         user:
- *           $ref: '#/components/schemas/SalaryStructure/properties/user'
+ *           $ref: '#/components/schemas/UserInfo'
  *         project:
- *           $ref: '#/components/schemas/SalaryStructure/properties/project'
+ *           $ref: '#/components/schemas/ProjectInfo'
  *         amount:
  *           type: number
  *           example: 5000
@@ -380,13 +412,20 @@
  *           example: 2000
  *         createdBy:
  *           type: object
+ *           properties:
+ *             _id:
+ *               type: string
+ *             name:
+ *               type: string
+ *             email:
+ *               type: string
  *         createdAt:
  *           type: string
  *           format: date-time
  *         updatedAt:
  *           type: string
  *           format: date-time
- * 
+ *
  *     AdvanceInput:
  *       type: object
  *       required:
@@ -410,7 +449,7 @@
  *         givenDate:
  *           type: string
  *           format: date-time
- * 
+ *
  *     RecoverAdvanceInput:
  *       type: object
  *       required:
@@ -420,7 +459,7 @@
  *           type: number
  *           minimum: 1
  *           example: 1000
- * 
+ *
  *     // ==================== RESPONSE SCHEMAS ====================
  *     ApiResponse:
  *       type: object
@@ -436,7 +475,7 @@
  *           type: integer
  *         summary:
  *           type: object
- * 
+ *
  *     ErrorResponse:
  *       type: object
  *       properties:
@@ -446,6 +485,40 @@
  *         message:
  *           type: string
  *           example: "Error message here"
+ *
+ *   responses:
+ *     UnauthorizedError:
+ *       description: Access token is missing or invalid
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/ErrorResponse'
+ *           example:
+ *             success: false
+ *             message: "Unauthorized"
+ *
+ *     ForbiddenError:
+ *       description: User doesn't have required permissions
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/ErrorResponse'
+ *           example:
+ *             success: false
+ *             message: "Only super admin can add attendance"
+ *
+ *     NotFoundError:
+ *       description: Resource not found
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/ErrorResponse'
+ *           example:
+ *             success: false
+ *             message: "Salary structure not found"
+ *
+ * security:
+ *   - bearerAuth: []
  */
 
 /**
@@ -483,18 +556,14 @@
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
  *       401:
- *         description: Unauthorized
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
+ *         $ref: '#/components/responses/UnauthorizedError'
  *       500:
  *         description: Server error
  *         content:
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
- * 
+ *
  *   get:
  *     summary: Get all salary structures
  *     tags: [Salary Structure]
@@ -542,11 +611,7 @@
  *                   items:
  *                     $ref: '#/components/schemas/SalaryStructure'
  *       401:
- *         description: Unauthorized
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
+ *         $ref: '#/components/responses/UnauthorizedError'
  *       500:
  *         description: Server error
  *         content:
@@ -599,11 +664,7 @@
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
  *       401:
- *         description: Unauthorized
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
+ *         $ref: '#/components/responses/UnauthorizedError'
  *       500:
  *         description: Server error
  *         content:
@@ -641,24 +702,16 @@
  *                 data:
  *                   $ref: '#/components/schemas/SalaryStructure'
  *       404:
- *         description: Salary structure not found
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
+ *         $ref: '#/components/responses/NotFoundError'
  *       401:
- *         description: Unauthorized
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
+ *         $ref: '#/components/responses/UnauthorizedError'
  *       500:
  *         description: Server error
  *         content:
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
- * 
+ *
  *   put:
  *     summary: Update salary structure
  *     tags: [Salary Structure]
@@ -691,11 +744,7 @@
  *                 data:
  *                   $ref: '#/components/schemas/SalaryStructure'
  *       404:
- *         description: Salary structure not found
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
+ *         $ref: '#/components/responses/NotFoundError'
  *       400:
  *         description: Validation error
  *         content:
@@ -703,18 +752,14 @@
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
  *       401:
- *         description: Unauthorized
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
+ *         $ref: '#/components/responses/UnauthorizedError'
  *       500:
  *         description: Server error
  *         content:
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
- * 
+ *
  *   delete:
  *     summary: Deactivate salary structure (soft delete)
  *     tags: [Salary Structure]
@@ -744,17 +789,9 @@
  *                 data:
  *                   $ref: '#/components/schemas/SalaryStructure'
  *       404:
- *         description: Salary structure not found
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
+ *         $ref: '#/components/responses/NotFoundError'
  *       401:
- *         description: Unauthorized
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
+ *         $ref: '#/components/responses/UnauthorizedError'
  *       500:
  *         description: Server error
  *         content:
@@ -840,11 +877,7 @@
  *                   items:
  *                     $ref: '#/components/schemas/Payroll'
  *       401:
- *         description: Unauthorized
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
+ *         $ref: '#/components/responses/UnauthorizedError'
  *       500:
  *         description: Server error
  *         content:
@@ -896,11 +929,7 @@
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
  *       401:
- *         description: Unauthorized
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
+ *         $ref: '#/components/responses/UnauthorizedError'
  *       500:
  *         description: Server error
  *         content:
@@ -959,11 +988,7 @@
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
  *       401:
- *         description: Unauthorized
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
+ *         $ref: '#/components/responses/UnauthorizedError'
  *       500:
  *         description: Server error
  *         content:
@@ -1007,11 +1032,7 @@
  *                     byUser:
  *                       type: array
  *       401:
- *         description: Unauthorized
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
+ *         $ref: '#/components/responses/UnauthorizedError'
  *       500:
  *         description: Server error
  *         content:
@@ -1051,24 +1072,16 @@
  *                 relatedAdvances:
  *                   type: array
  *       404:
- *         description: Payroll not found
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
+ *         $ref: '#/components/responses/NotFoundError'
  *       401:
- *         description: Unauthorized
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
+ *         $ref: '#/components/responses/UnauthorizedError'
  *       500:
  *         description: Server error
  *         content:
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
- * 
+ *
  *   put:
  *     summary: Update payroll (only if not paid)
  *     tags: [Payroll]
@@ -1120,24 +1133,16 @@
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
  *       404:
- *         description: Payroll not found
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
+ *         $ref: '#/components/responses/NotFoundError'
  *       401:
- *         description: Unauthorized
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
+ *         $ref: '#/components/responses/UnauthorizedError'
  *       500:
  *         description: Server error
  *         content:
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
- * 
+ *
  *   delete:
  *     summary: Delete payroll (only if pending)
  *     tags: [Payroll]
@@ -1171,17 +1176,9 @@
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
  *       404:
- *         description: Payroll not found
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
+ *         $ref: '#/components/responses/NotFoundError'
  *       401:
- *         description: Unauthorized
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
+ *         $ref: '#/components/responses/UnauthorizedError'
  *       500:
  *         description: Server error
  *         content:
@@ -1233,17 +1230,9 @@
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
  *       404:
- *         description: Payroll not found
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
+ *         $ref: '#/components/responses/NotFoundError'
  *       401:
- *         description: Unauthorized
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
+ *         $ref: '#/components/responses/UnauthorizedError'
  *       500:
  *         description: Server error
  *         content:
@@ -1287,18 +1276,14 @@
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
  *       401:
- *         description: Unauthorized
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
+ *         $ref: '#/components/responses/UnauthorizedError'
  *       500:
  *         description: Server error
  *         content:
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
- * 
+ *
  *   get:
  *     summary: Get all advances
  *     tags: [Advances]
@@ -1353,11 +1338,7 @@
  *                   items:
  *                     $ref: '#/components/schemas/Advance'
  *       401:
- *         description: Unauthorized
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
+ *         $ref: '#/components/responses/UnauthorizedError'
  *       500:
  *         description: Server error
  *         content:
@@ -1411,11 +1392,7 @@
  *                     totalPending:
  *                       type: number
  *       401:
- *         description: Unauthorized
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
+ *         $ref: '#/components/responses/UnauthorizedError'
  *       500:
  *         description: Server error
  *         content:
@@ -1478,11 +1455,7 @@
  *                     pending:
  *                       type: integer
  *       401:
- *         description: Unauthorized
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
+ *         $ref: '#/components/responses/UnauthorizedError'
  *       500:
  *         description: Server error
  *         content:
@@ -1522,24 +1495,16 @@
  *                 relatedPayrolls:
  *                   type: array
  *       404:
- *         description: Advance not found
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
+ *         $ref: '#/components/responses/NotFoundError'
  *       401:
- *         description: Unauthorized
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
+ *         $ref: '#/components/responses/UnauthorizedError'
  *       500:
  *         description: Server error
  *         content:
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
- * 
+ *
  *   put:
  *     summary: Update advance (only if pending)
  *     tags: [Advances]
@@ -1586,24 +1551,16 @@
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
  *       404:
- *         description: Advance not found
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
+ *         $ref: '#/components/responses/NotFoundError'
  *       401:
- *         description: Unauthorized
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
+ *         $ref: '#/components/responses/UnauthorizedError'
  *       500:
  *         description: Server error
  *         content:
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
- * 
+ *
  *   delete:
  *     summary: Delete advance (only if pending)
  *     tags: [Advances]
@@ -1637,17 +1594,9 @@
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
  *       404:
- *         description: Advance not found
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
+ *         $ref: '#/components/responses/NotFoundError'
  *       401:
- *         description: Unauthorized
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
+ *         $ref: '#/components/responses/UnauthorizedError'
  *       500:
  *         description: Server error
  *         content:
@@ -1699,17 +1648,9 @@
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
  *       404:
- *         description: Advance not found
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
+ *         $ref: '#/components/responses/NotFoundError'
  *       401:
- *         description: Unauthorized
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
+ *         $ref: '#/components/responses/UnauthorizedError'
  *       500:
  *         description: Server error
  *         content:
