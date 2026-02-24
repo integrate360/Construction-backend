@@ -403,7 +403,7 @@ export const getProjectTimeline = async (req, res) => {
 export const adminAddAttendanceForLabour = async (req, res) => {
   try {
     const {
-      userId,
+      labourId,
       projectId,
       attendanceType,
       selfieImage,
@@ -412,19 +412,16 @@ export const adminAddAttendanceForLabour = async (req, res) => {
     } = req.body;
 
     // 🔐 Auth + Role
-    if (
-      !req.user ||
-      !["site_manager", "labour"].includes(req.user.role)
-    ) {
+    if (!req.user || req.user.role !== "super_admin") {
       return res.status(403).json({
         success: false,
-        message: "Only site manager or labour can mark attendance",
+        message: "Only super admin can add attendance",
       });
     }
 
     // ✅ Validation
     if (
-      !userId ||
+      !labourId ||
       !projectId ||
       !attendanceType ||
       !selfieImage ||
@@ -450,26 +447,29 @@ export const adminAddAttendanceForLabour = async (req, res) => {
       });
     }
 
+    // 🔍 Find attendance document
     let attendanceDoc = await Attendance.findOne({
-      user: userId,
+      user: labourId,
       project: projectId,
     });
 
     if (!attendanceDoc) {
       attendanceDoc = await Attendance.create({
-        user: userId,
+        user: labourId,
         project: projectId,
         history: [],
       });
     }
 
+    // 🔎 Last entry
     const lastEntry = attendanceDoc.history[attendanceDoc.history.length - 1];
 
-    // 🧠 AUTO-FIX LOGIC
+    // 🧠 AUTO-FIX LOGIC (ADMIN OVERRIDE)
     if (
       attendanceType === "check-in" &&
       lastEntry?.attendanceType === "check-in"
     ) {
+      // Auto checkout previous session
       attendanceDoc.history.push({
         attendanceType: "check-out",
         selfieImage: "admin-auto-checkout",
@@ -480,6 +480,7 @@ export const adminAddAttendanceForLabour = async (req, res) => {
       });
     }
 
+    // ✅ PUSH ADMIN ENTRY
     attendanceDoc.history.push({
       attendanceType,
       selfieImage,
@@ -496,11 +497,11 @@ export const adminAddAttendanceForLabour = async (req, res) => {
 
     return res.status(201).json({
       success: true,
-      message: "Attendance added successfully",
+      message: "Attendance added by admin successfully",
       history: attendanceDoc.history,
     });
   } catch (error) {
-    console.error("Add Attendance Error:", error);
+    console.error("Admin Add Attendance Error:", error);
     res.status(500).json({
       success: false,
       message: error.message,
