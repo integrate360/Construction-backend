@@ -149,51 +149,48 @@ export const getMyAttendance = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+
 export const getProjectAttendance = async (req, res) => {
   try {
-    const attendance = await Attendance.find({
+    const attendanceDocs = await Attendance.find({
       project: req.params.projectId,
     })
       .populate("user", "name phoneNumber")
       .sort({ createdAt: -1 });
 
-    const projectAttendance = attendance.reduce((acc, record) => {
+    const projectAttendance = attendanceDocs.reduce((acc, record) => {
       const userId = record.user._id.toString();
 
       if (!acc[userId]) {
         acc[userId] = {
           user: record.user,
-          attendanceHistory: [],
-          workingTime: {
-            totalMinutes: 0,
-            totalHours: 0,
-          },
+          attendance: [],
+          totalWorkingMinutes: 0,
+          totalWorkingHours: 0,
         };
       }
 
-      acc[userId].attendanceHistory.push(...record.history);
+      acc[userId].attendance.push(...record.history);
       return acc;
     }, {});
 
-    // ✅ Calculate working time per user
+    // ✅ IST-AWARE CALCULATION
     for (const userId in projectAttendance) {
-      const history = projectAttendance[userId].attendanceHistory;
-
-      const { totalMinutes, totalHours } = calculateTotalWorkingTime(
-        history.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)),
+      const sortedHistory = projectAttendance[userId].attendance.sort(
+        (a, b) => new Date(a.createdAt) - new Date(b.createdAt),
       );
 
-      projectAttendance[userId].workingTime = {
-        totalMinutes,
-        totalHours,
-      };
+      const { totalMinutes, totalHours } =
+        calculateTotalWorkingTime(sortedHistory);
+
+      projectAttendance[userId].totalWorkingMinutes = totalMinutes;
+      projectAttendance[userId].totalWorkingHours = totalHours;
     }
 
     return res.status(200).json({
       success: true,
-      projectId: req.params.projectId,
       attendance: projectAttendance,
-      totalUsers: Object.keys(projectAttendance).length,
+      totalRecords: attendanceDocs.length,
     });
   } catch (error) {
     console.error("Get Project Attendance Error:", error);
