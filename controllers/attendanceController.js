@@ -1,6 +1,7 @@
 import Attendance from "../models/Attendance.js";
 import Project from "../models/Project.js";
 import { getDistanceInMeters } from "../helpers/geoDistance.js";
+import { calculateTotalWorkingTime } from "../helpers/attendanceUtils.js";
 
 export const submitAttendance = async (req, res) => {
   try {
