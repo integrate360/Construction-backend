@@ -17,7 +17,7 @@
  *       description: Enter JWT token in format "Bearer {token}"
  *
  *   schemas:
- *     // ==================== SALARY STRUCTURE SCHEMAS ====================
+
  *     SalaryType:
  *       type: string
  *       enum: [daily, monthly, hourly]
@@ -156,7 +156,6 @@
  *           type: string
  *           format: date-time
  *
- *     // ==================== PAYROLL SCHEMAS ====================
  *     AllowanceReason:
  *       type: string
  *       enum: [bonus, travel, food, overtime, other]
@@ -381,7 +380,6 @@
  *           type: string
  *           format: date-time
  *
- *     // ==================== ADVANCE SCHEMAS ====================
  *     RecoveryStatus:
  *       type: string
  *       enum: [pending, partially_recovered, recovered]
@@ -459,8 +457,7 @@
  *           type: number
  *           minimum: 1
  *           example: 1000
- *
- *     // ==================== RESPONSE SCHEMAS ====================
+ 
  *     ApiResponse:
  *       type: object
  *       properties:

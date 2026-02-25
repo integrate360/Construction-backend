@@ -150,34 +150,58 @@ export const getMyAttendance = async (req, res) => {
 };
 export const getProjectAttendance = async (req, res) => {
   try {
-    const attendance = await Attendance.find({
-      project: req.params.projectId,
-    })
-      .populate("user", "name phoneNumber")
-      .sort({ createdAt: -1 });
+    const { projectId } = req.params;
+    const { date } = req.query;
 
-    // Group attendance by user and date for better project management
-    const projectAttendance = attendance.reduce((acc, record) => {
-      const userId = record.user._id.toString();
-      if (!acc[userId]) {
-        acc[userId] = {
-          user: record.user,
-          attendance: [],
-        };
+    const start = new Date(date);
+    start.setHours(0, 0, 0, 0);
+
+    const end = new Date(start);
+    end.setDate(end.getDate() + 1);
+
+    const project = await Project.findById(projectId)
+      .populate("labour", "name phoneNumber");
+
+    const attendanceDocs = await Attendance.find({ project: projectId });
+
+    const presentUserIds = new Set();
+
+    attendanceDocs.forEach(doc => {
+      const presentToday = doc.history.some(h =>
+        h.createdAt >= start && h.createdAt < end
+      );
+
+      if (presentToday) {
+        presentUserIds.add(doc.user.toString());
       }
-      acc[userId].attendance.push(record);
-      return acc;
-    }, {});
-
-    res.status(200).json({
-      success: true,
-      attendance: projectAttendance,
-      totalRecords: attendance.length,
     });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
+
+    const result = project.labour.map(labour => ({
+      userId: labour._id,
+      name: labour.name,
+      phoneNumber: labour.phoneNumber,
+      status: presentUserIds.has(labour._id.toString())
+        ? "present"
+        : "absent"
+    }));
+
+    res.json({
+      success: true,
+      project: {
+        id: project._id,
+        name: project.projectName
+      },
+      date,
+      totalLabour: project.labour.length,
+      presentCount: result.filter(r => r.status === "present").length,
+      absentCount: result.filter(r => r.status === "absent").length,
+      attendance: result
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
   }
 };
+
 export const getTodayAttendanceStatus = async (req, res) => {
   try {
     const userId = req.user._id;
@@ -237,7 +261,7 @@ export const getTodayAttendanceStatus = async (req, res) => {
 };
 export const getDailyWorkingHours = async (req, res) => {
   try {
-    const { date } = req.query; // YYYY-MM-DD
+    const { date } = req.query; 
     const start = new Date(date);
     start.setHours(0, 0, 0, 0);
     const end = new Date(start);
@@ -441,8 +465,6 @@ export const getProjectTimeline = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
-
-
 
 export const adminAddAttendanceForUser = async (req, res) => {
   try {
