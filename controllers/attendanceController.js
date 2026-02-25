@@ -372,7 +372,7 @@ export const adminEditAttendance = async (req, res) => {
 
     // CHECK IF USER BELONGS TO THIS PROJECT
     const isUserSiteManager = project.site_manager?.toString() === userId;
-    const isUserLabour = project.labour?.some(id => id.toString() === userId);
+    const isUserLabour = project.labour?.some((id) => id.toString() === userId);
 
     if (!isUserSiteManager && !isUserLabour) {
       return res.status(401).json({
@@ -468,13 +468,7 @@ export const getProjectTimeline = async (req, res) => {
 
 export const adminAddAttendanceForUser = async (req, res) => {
   try {
-    const {
-      userId,
-      attendanceType,
-      selfieImage,
-      coordinates,
-      createdAt,
-    } = req.body;
+    const { userId, attendanceType, coordinates, createdAt } = req.body;
 
     // 🔐 SUPER ADMIN CHECK
     if (!req.user || req.user.role !== "super_admin") {
@@ -485,7 +479,7 @@ export const adminAddAttendanceForUser = async (req, res) => {
     }
 
     // ✅ BASIC VALIDATION
-    if (!userId || !attendanceType || !selfieImage || !coordinates) {
+    if (!userId || !attendanceType || !coordinates) {
       return res.status(400).json({
         success: false,
         message: "All fields are required",
@@ -508,10 +502,7 @@ export const adminAddAttendanceForUser = async (req, res) => {
 
     // 🔍 FIND PROJECT AUTOMATICALLY
     const project = await Project.findOne({
-      $or: [
-        { site_manager: userId },
-        { labour: userId },
-      ],
+      $or: [{ site_manager: userId }, { labour: userId }],
       projectStatus: { $ne: "completed" }, // optional safety
     });
 
@@ -538,8 +529,7 @@ export const adminAddAttendanceForUser = async (req, res) => {
       });
     }
 
-    const lastEntry =
-      attendanceDoc.history[attendanceDoc.history.length - 1];
+    const lastEntry = attendanceDoc.history[attendanceDoc.history.length - 1];
 
     // 🧠 AUTO FIX (ADMIN OVERRIDE)
     if (
@@ -559,7 +549,7 @@ export const adminAddAttendanceForUser = async (req, res) => {
     // ✅ ADD ENTRY
     attendanceDoc.history.push({
       attendanceType,
-      selfieImage,
+      selfieImage: "admin-auto-checkout",
       location: {
         type: "Point",
         coordinates,
@@ -602,15 +592,15 @@ export const deleteAttendanceRecord = async (req, res) => {
 
     const attendance = await Attendance.findById(attendanceId);
     if (!attendance) {
-      return res.status(404).json({ 
+      return res.status(404).json({
         success: false,
-        message: "Attendance record not found" 
+        message: "Attendance record not found",
       });
     }
 
     // Find the history entry by its _id using Mongoose's .id() method
     const historyEntry = attendance.history.id(historyIndex);
-    
+
     if (!historyEntry) {
       return res.status(404).json({
         success: false,
@@ -625,7 +615,7 @@ export const deleteAttendanceRecord = async (req, res) => {
     return res.status(200).json({
       success: true,
       message: "Attendance record deleted successfully",
-      deletedEntry: historyEntry // Optional: return the deleted entry
+      deletedEntry: historyEntry, // Optional: return the deleted entry
     });
   } catch (error) {
     console.error("Delete Attendance Error:", error);
