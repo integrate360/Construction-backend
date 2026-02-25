@@ -150,55 +150,56 @@ export const getMyAttendance = async (req, res) => {
 };
 export const getProjectAttendance = async (req, res) => {
   try {
-    const { projectId } = req.params;
-    const { date } = req.query;
+    const attendance = await Attendance.find({
+      project: req.params.projectId,
+    })
+      .populate("user", "name phoneNumber")
+      .sort({ createdAt: -1 });
 
-    const start = new Date(date);
-    start.setHours(0, 0, 0, 0);
+    const projectAttendance = attendance.reduce((acc, record) => {
+      const userId = record.user._id.toString();
 
-    const end = new Date(start);
-    end.setDate(end.getDate() + 1);
+      if (!acc[userId]) {
+        acc[userId] = {
+          user: record.user,
+          attendanceHistory: [],
+          workingTime: {
+            totalMinutes: 0,
+            totalHours: 0,
+          },
+        };
+      }
 
-    const project = await Project.findById(projectId)
-      .populate("labour", "name phoneNumber");
+      acc[userId].attendanceHistory.push(...record.history);
+      return acc;
+    }, {});
 
-    const attendanceDocs = await Attendance.find({ project: projectId });
+    // ✅ Calculate working time per user
+    for (const userId in projectAttendance) {
+      const history = projectAttendance[userId].attendanceHistory;
 
-    const presentUserIds = new Set();
-
-    attendanceDocs.forEach(doc => {
-      const presentToday = doc.history.some(h =>
-        h.createdAt >= start && h.createdAt < end
+      const { totalMinutes, totalHours } = calculateTotalWorkingTime(
+        history.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)),
       );
 
-      if (presentToday) {
-        presentUserIds.add(doc.user.toString());
-      }
-    });
+      projectAttendance[userId].workingTime = {
+        totalMinutes,
+        totalHours,
+      };
+    }
 
-    const result = project.labour.map(labour => ({
-      userId: labour._id,
-      name: labour.name,
-      phoneNumber: labour.phoneNumber,
-      status: presentUserIds.has(labour._id.toString())
-        ? "present"
-        : "absent"
-    }));
-
-    res.json({
+    return res.status(200).json({
       success: true,
-      project: {
-        id: project._id,
-        name: project.projectName
-      },
-      date,
-      totalLabour: project.labour.length,
-      presentCount: result.filter(r => r.status === "present").length,
-      absentCount: result.filter(r => r.status === "absent").length,
-      attendance: result
+      projectId: req.params.projectId,
+      attendance: projectAttendance,
+      totalUsers: Object.keys(projectAttendance).length,
     });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
+  } catch (error) {
+    console.error("Get Project Attendance Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
   }
 };
 
@@ -261,7 +262,7 @@ export const getTodayAttendanceStatus = async (req, res) => {
 };
 export const getDailyWorkingHours = async (req, res) => {
   try {
-    const { date } = req.query; 
+    const { date } = req.query;
     const start = new Date(date);
     start.setHours(0, 0, 0, 0);
     const end = new Date(start);
@@ -469,41 +470,35 @@ export const getProjectTimeline = async (req, res) => {
 export const adminAddAttendanceForUser = async (req, res) => {
   try {
     const { userId, attendanceType, coordinates, createdAt } = req.body;
-
-    // 🔐 SUPER ADMIN CHECK
     if (!req.user || req.user.role !== "super_admin") {
       return res.status(403).json({
         success: false,
         message: "Only super admin can add attendance",
       });
     }
-
-    // ✅ BASIC VALIDATION
     if (!userId || !attendanceType || !coordinates) {
       return res.status(400).json({
         success: false,
-        message: "All fields are required",
+        message: "userId, attendanceType and coordinates are required",
       });
     }
 
     if (!["check-in", "check-out"].includes(attendanceType)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid attendance type",
+        message: "attendanceType must be check-in or check-out",
       });
     }
 
     if (!Array.isArray(coordinates) || coordinates.length !== 2) {
       return res.status(400).json({
         success: false,
-        message: "Coordinates must be [longitude, latitude]",
+        message: "coordinates must be [longitude, latitude]",
       });
     }
-
-    // 🔍 FIND PROJECT AUTOMATICALLY
     const project = await Project.findOne({
       $or: [{ site_manager: userId }, { labour: userId }],
-      projectStatus: { $ne: "completed" }, // optional safety
+      projectStatus: { $ne: "completed" },
     });
 
     if (!project) {
@@ -512,44 +507,51 @@ export const adminAddAttendanceForUser = async (req, res) => {
         message: "No active project found for this user",
       });
     }
-
-    const projectId = project._id;
-
-    // 🔍 FIND OR CREATE ATTENDANCE DOC
     let attendanceDoc = await Attendance.findOne({
       user: userId,
-      project: projectId,
+      project: project._id,
     });
 
     if (!attendanceDoc) {
       attendanceDoc = await Attendance.create({
         user: userId,
-        project: projectId,
+        project: project._id,
         history: [],
       });
     }
 
-    const lastEntry = attendanceDoc.history[attendanceDoc.history.length - 1];
+    const history = attendanceDoc.history;
+    const lastEntry = history[history.length - 1];
 
-    // 🧠 AUTO FIX (ADMIN OVERRIDE)
     if (
       attendanceType === "check-in" &&
       lastEntry?.attendanceType === "check-in"
     ) {
-      attendanceDoc.history.push({
-        attendanceType: "check-out",
-        selfieImage: "admin-auto-checkout",
-        location: lastEntry.location,
-        createdAt: createdAt ? new Date(createdAt) : new Date(),
-        editedByAdmin: true,
-        editedAt: new Date(),
+      return res.status(400).json({
+        success: false,
+        message: "User is already checked in. Please add check-out first.",
       });
     }
 
-    // ✅ ADD ENTRY
-    attendanceDoc.history.push({
+    if (attendanceType === "check-out" && !lastEntry) {
+      return res.status(400).json({
+        success: false,
+        message: "Cannot check-out without a check-in",
+      });
+    }
+
+    if (
+      attendanceType === "check-out" &&
+      lastEntry?.attendanceType === "check-out"
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "User is already checked out",
+      });
+    }
+    history.push({
       attendanceType,
-      selfieImage: "admin-auto-checkout",
+      selfieImage: "admin-entry",
       location: {
         type: "Point",
         coordinates,
@@ -560,7 +562,6 @@ export const adminAddAttendanceForUser = async (req, res) => {
     });
 
     await attendanceDoc.save();
-
     return res.status(201).json({
       success: true,
       message: "Attendance added successfully by admin",
@@ -568,7 +569,8 @@ export const adminAddAttendanceForUser = async (req, res) => {
         id: project._id,
         name: project.projectName,
       },
-      history: attendanceDoc.history,
+      lastEntry: history[history.length - 1],
+      fullHistory: history,
     });
   } catch (error) {
     console.error("Admin Add Attendance Error:", error);
