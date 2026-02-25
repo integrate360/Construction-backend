@@ -438,8 +438,13 @@ export const generateBulkPayroll = async (req, res) => {
 
 export const getAllPayrolls = async (req, res) => {
   try {
-    const { project, user, role, paymentStatus, periodStart, periodEnd } =
-      req.query;
+    const { project, user, role, paymentStatus, periodStart, periodEnd } = req.query;
+
+    // Pagination
+    const page  = parseInt(req.query.page)  || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip  = (page - 1) * limit;
+
     const filter = {};
 
     if (project) filter.project = project;
@@ -448,6 +453,9 @@ export const getAllPayrolls = async (req, res) => {
     if (paymentStatus) filter.paymentStatus = paymentStatus;
     if (periodStart) filter.periodStart = { $gte: new Date(periodStart) };
     if (periodEnd) filter.periodEnd = { $lte: new Date(periodEnd) };
+
+    // Count total documents for pagination
+    const totalDocuments = await Payroll.countDocuments(filter);
 
     const payrolls = await Payroll.find(filter)
       .populate({
@@ -467,27 +475,30 @@ export const getAllPayrolls = async (req, res) => {
         select: "salaryType rateAmount overtimeRate effectiveFrom",
       })
       .populate("createdBy", "name email role")
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
 
-    // Calculate summary
+    // Build summary (same as before)
     const summary = {
       totalPayrolls: payrolls.length,
       totalNetSalary: payrolls.reduce((sum, p) => sum + p.netSalary, 0),
       totalGrossSalary: payrolls.reduce((sum, p) => sum + p.grossSalary, 0),
       totalPaid: payrolls.filter((p) => p.paymentStatus === "paid").length,
-      totalPending: payrolls.filter((p) => p.paymentStatus === "pending")
-        .length,
-      totalPartiallyPaid: payrolls.filter(
-        (p) => p.paymentStatus === "partially_paid",
-      ).length,
+      totalPending: payrolls.filter((p) => p.paymentStatus === "pending").length,
+      totalPartiallyPaid: payrolls.filter((p) => p.paymentStatus === "partially_paid").length,
     };
 
     res.status(200).json({
       success: true,
       count: payrolls.length,
+      totalDocuments,
+      currentPage: page,
+      totalPages: Math.ceil(totalDocuments / limit),
       summary,
       data: payrolls,
     });
+
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
