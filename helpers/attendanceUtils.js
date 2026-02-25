@@ -1,24 +1,21 @@
-const IST_OFFSET_MINUTES = 330; // 5h 30m
-
-const toIST = (date) =>
-  new Date(new Date(date).getTime() + IST_OFFSET_MINUTES * 60 * 1000);
 
 export const calculateTotalWorkingTime = (history = []) => {
   let totalMinutes = 0;
   let lastCheckIn = null;
 
+  // history must be sorted by createdAt ASC
   for (const entry of history) {
-    const istTime = toIST(entry.createdAt);
+    const time = new Date(entry.createdAt); // ✅ UTC
 
     if (entry.attendanceType === "check-in") {
-      lastCheckIn = istTime;
+      lastCheckIn = time;
     }
 
     if (entry.attendanceType === "check-out" && lastCheckIn) {
-      const diffMs = istTime - lastCheckIn;
+      const diffMs = time - lastCheckIn;
 
       if (diffMs > 0) {
-        totalMinutes += Math.floor(diffMs / (1000 * 60));
+        totalMinutes += Math.round(diffMs / (1000 * 60)); // accurate minutes
       }
 
       lastCheckIn = null;

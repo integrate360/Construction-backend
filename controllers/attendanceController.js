@@ -2,6 +2,8 @@ import Attendance from "../models/Attendance.js";
 import Project from "../models/Project.js";
 import { getDistanceInMeters } from "../helpers/geoDistance.js";
 import { calculateTotalWorkingTime } from "../helpers/attendanceUtils.js";
+import { getDateRangeUTC } from "../helpers/dateUtils.js";
+import User from "../models/User.js";
 
 export const submitAttendance = async (req, res) => {
   try {
@@ -150,56 +152,296 @@ export const getMyAttendance = async (req, res) => {
   }
 };
 
+
 export const getProjectAttendance = async (req, res) => {
   try {
-    const attendanceDocs = await Attendance.find({
-      project: req.params.projectId,
-    })
-      .populate("user", "name phoneNumber")
-      .sort({ createdAt: -1 });
+    const { date, from, to, userId } = req.query;
+    const { projectId } = req.params;
 
-    const projectAttendance = attendanceDocs.reduce((acc, record) => {
-      const userId = record.user._id.toString();
+    /* ===============================
+       GET PROJECT
+    =============================== */
+    const project = await Project.findById(projectId).select(
+      "site_manager labour",
+    );
 
-      if (!acc[userId]) {
-        acc[userId] = {
-          user: record.user,
-          attendance: [],
-          totalWorkingMinutes: 0,
-          totalWorkingHours: 0,
-        };
-      }
-
-      acc[userId].attendance.push(...record.history);
-      return acc;
-    }, {});
-
-    // ✅ IST-AWARE CALCULATION
-    for (const userId in projectAttendance) {
-      const sortedHistory = projectAttendance[userId].attendance.sort(
-        (a, b) => new Date(a.createdAt) - new Date(b.createdAt),
-      );
-
-      const { totalMinutes, totalHours } =
-        calculateTotalWorkingTime(sortedHistory);
-
-      projectAttendance[userId].totalWorkingMinutes = totalMinutes;
-      projectAttendance[userId].totalWorkingHours = totalHours;
+    if (!project) {
+      return res.status(404).json({
+        success: false,
+        message: "Project not found",
+      });
     }
 
+    let userIds = [project.site_manager, ...(project.labour || [])].filter(
+      Boolean,
+    );
+
+    /* ===============================
+       USER FILTER
+    =============================== */
+    if (userId) {
+      if (!userIds.map(String).includes(userId)) {
+        return res.status(400).json({
+          success: false,
+          message: "User does not belong to this project",
+        });
+      }
+      userIds = [userId];
+    }
+
+    /* ===============================
+       GET USERS
+    =============================== */
+    const users = await User.find({
+      _id: { $in: userIds },
+    }).select("name phoneNumber");
+
+    /* ===============================
+       GET ATTENDANCE RECORDS
+    =============================== */
+    const attendanceDocs = await Attendance.find({
+      project: projectId,
+      user: { $in: userIds },
+    }).populate("user", "name phoneNumber");
+
+    /* ===============================
+       DATE RANGE LOGIC
+    =============================== */
+    let startDate, endDate;
+
+    if (date) {
+      startDate = new Date(`${date}T00:00:00.000Z`);
+      endDate = new Date(`${date}T23:59:59.999Z`);
+    } else if (from && to) {
+      const fromDate = new Date(from);
+      const toDate = new Date(to);
+      const daysDiff = Math.ceil((toDate - fromDate) / (1000 * 60 * 60 * 24));
+      
+      if (daysDiff > 90) {
+        return res.status(400).json({
+          success: false,
+          message: "Date range cannot exceed 90 days. Please use a smaller range.",
+        });
+      }
+      
+      startDate = new Date(`${from}T00:00:00.000Z`);
+      endDate = new Date(`${to}T23:59:59.999Z`);
+    } else {
+      endDate = new Date();
+      startDate = new Date();
+      startDate.setDate(startDate.getDate() - 30);
+      startDate.setUTCHours(0, 0, 0, 0);
+      endDate.setUTCHours(23, 59, 59, 999);
+    }
+
+    /* ===============================
+       CREATE ATTENDANCE MAP FOR ALL USERS
+    =============================== */
+    const attendanceByUser = {};
+    attendanceDocs.forEach(doc => {
+      attendanceByUser[doc.user._id.toString()] = doc;
+    });
+
+    /* ===============================
+       COLLECT ALL DATES THAT HAVE ATTENDANCE
+    =============================== */
+    const attendanceDatesSet = new Set();
+    
+    // Collect all unique dates from history within the range
+    attendanceDocs.forEach(doc => {
+      doc.history.forEach(entry => {
+        const entryDate = new Date(entry.createdAt);
+        if (entryDate >= startDate && entryDate <= endDate) {
+          const dateStr = entryDate.toISOString().split('T')[0];
+          attendanceDatesSet.add(dateStr);
+        }
+      });
+    });
+
+    // Convert set to sorted array of dates that have attendance
+    const activeDates = Array.from(attendanceDatesSet).sort();
+    
+    console.log("📅 Active Dates (with attendance):", activeDates);
+
+    /* ===============================
+       CREATE RESPONSE WITH YOUR ORIGINAL FORMAT
+       But only include dates that have attendance
+    =============================== */
+    const attendanceRecords = [];
+
+    // Process each user
+    for (const user of users) {
+      const userId = user._id.toString();
+      const attendanceDoc = attendanceByUser[userId];
+      
+      // Initialize days array with ONLY active dates (dates that have attendance)
+      const days = activeDates.map(date => ({
+        date,
+        status: "absent", // Default to absent
+        history: [],
+        totalWorkingMinutes: 0,
+        totalWorkingHours: 0,
+      }));
+
+      // If user has attendance records, update the present days
+      if (attendanceDoc) {
+        const attendanceId = attendanceDoc._id;
+        
+        // Process each active date
+        for (let i = 0; i < days.length; i++) {
+          const dateStr = days[i].date;
+          const dayStart = new Date(`${dateStr}T00:00:00.000Z`);
+          const dayEnd = new Date(`${dateStr}T23:59:59.999Z`);
+          
+          // Get history for this specific date
+          const dayHistory = attendanceDoc.history.filter(h => {
+            const hDate = new Date(h.createdAt);
+            return hDate >= dayStart && hDate <= dayEnd;
+          });
+          
+          if (dayHistory.length > 0) {
+            // Sort history entries
+            dayHistory.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+            
+            // Calculate working time
+            const { totalMinutes, totalHours } = calculateTotalWorkingTime(dayHistory);
+            
+            days[i].status = "present";
+            days[i].history = dayHistory;
+            days[i].totalWorkingMinutes = totalMinutes;
+            days[i].totalWorkingHours = totalHours;
+          }
+        }
+
+        // Add attendance record with ID for users who have attendance documents
+        attendanceRecords.push({
+          _id: attendanceId,
+          user: {
+            _id: user._id,
+            name: user.name,
+            phoneNumber: user.phoneNumber,
+          },
+          project: projectId,
+          days: days,
+          hasAttendance: true
+        });
+      } else {
+        // For users without any attendance records, create a record with all days absent
+        attendanceRecords.push({
+          _id: null,
+          user: {
+            _id: user._id,
+            name: user.name,
+            phoneNumber: user.phoneNumber,
+          },
+          project: projectId,
+          days: days, // All active dates marked as absent
+          hasAttendance: false
+        });
+      }
+    }
+
+    /* ===============================
+       FINAL RESPONSE - YOUR ORIGINAL FORMAT
+    =============================== */
     return res.status(200).json({
       success: true,
-      attendance: projectAttendance,
-      totalRecords: attendanceDocs.length,
+      attendance: attendanceRecords,
+      totalRecords: attendanceRecords.length,
+      totalDays: activeDates.length, // Now this is only days with attendance
+      dateRange: {
+        from: startDate.toISOString().split('T')[0],
+        to: endDate.toISOString().split('T')[0]
+      }
     });
+    
   } catch (error) {
-    console.error("Get Project Attendance Error:", error);
+    console.error("🔥 Get Project Attendance Error:", error);
     return res.status(500).json({
       success: false,
       message: error.message,
     });
   }
 };
+
+// export const getProjectAttendance = async (req, res) => {
+//   try {
+//     const { date, from, to } = req.query;
+//     let dateFilter = {};
+
+//     if (date) {
+//       const start = new Date(`${date}T00:00:00.000Z`);
+//       const end = new Date(`${date}T23:59:59.999Z`);
+//       dateFilter = { createdAt: { $gte: start, $lte: end } };
+//     }
+
+//     if (from && to) {
+//       const start = new Date(`${from}T00:00:00.000Z`);
+//       const end = new Date(`${to}T23:59:59.999Z`);
+//       dateFilter = { createdAt: { $gte: start, $lte: end } };
+//     }
+
+//     const attendanceDocs = await Attendance.find({
+//       project: req.params.projectId,
+//     })
+//       .populate("user", "name phoneNumber")
+//       .sort({ createdAt: -1 });
+//     const projectAttendance = attendanceDocs.reduce((acc, record) => {
+//       const userId = record.user._id.toString();
+
+//       if (!acc[userId]) {
+//         acc[userId] = {
+//           user: record.user,
+//           history: [],
+//           totalWorkingMinutes: 0,
+//           totalWorkingHours: 0,
+//         };
+//       }
+
+//       // ✅ Filter history by date if provided
+//       const filteredHistory =
+//         Object.keys(dateFilter).length === 0
+//           ? record.history
+//           : record.history.filter((h) => {
+//               const time = new Date(h.createdAt);
+//               return (
+//                 time >= dateFilter.createdAt.$gte &&
+//                 time <= dateFilter.createdAt.$lte
+//               );
+//             });
+
+//       acc[userId].history.push(...filteredHistory);
+//       return acc;
+//     }, {});
+
+//     /* ===============================
+//        CALCULATE WORKING TIME (UTC)
+//     =============================== */
+//     for (const userId in projectAttendance) {
+//       const sortedHistory = projectAttendance[userId].history.sort(
+//         (a, b) => new Date(a.createdAt) - new Date(b.createdAt)
+//       );
+
+//       const { totalMinutes, totalHours } =
+//         calculateTotalWorkingTime(sortedHistory);
+
+//       projectAttendance[userId].totalWorkingMinutes = totalMinutes;
+//       projectAttendance[userId].totalWorkingHours = totalHours;
+//     }
+
+//     return res.status(200).json({
+//       success: true,
+//       attendance: projectAttendance,
+//       totalRecords: attendanceDocs.length,
+//     });
+//   } catch (error) {
+//     console.error("Get Project Attendance Error:", error);
+//     return res.status(500).json({
+//       success: false,
+//       message: error.message,
+//     });
+//   }
+// };
 
 export const getTodayAttendanceStatus = async (req, res) => {
   try {
@@ -329,9 +571,14 @@ export const getMonthlySummary = async (req, res) => {
 
 export const adminEditAttendance = async (req, res) => {
   try {
-    const { attendanceId, historyIndex, attendanceType } = req.body;
+    console.log("🔵 Admin Edit Attendance API called");
+    console.log("➡️ Request Body:", req.body);
 
-    // SUPER ADMIN CHECK
+    const { attendanceId, historyId, attendanceType, createdAt } = req.body;
+
+    /* ===============================
+       SUPER ADMIN CHECK
+    =============================== */
     if (!req.user || req.user.role !== "super_admin") {
       return res.status(403).json({
         success: false,
@@ -339,15 +586,33 @@ export const adminEditAttendance = async (req, res) => {
       });
     }
 
-    // Validate attendance type
-    if (!["check-in", "check-out"].includes(attendanceType)) {
+    /* ===============================
+       BASIC VALIDATION
+    =============================== */
+    if (!attendanceId || !historyId) {
+      return res.status(400).json({
+        success: false,
+        message: "attendanceId and historyId are required",
+      });
+    }
+
+    if (attendanceType && !["check-in", "check-out"].includes(attendanceType)) {
       return res.status(400).json({
         success: false,
         message: "Invalid attendance type",
       });
     }
 
-    // FIND ATTENDANCE DOCUMENT
+    if (createdAt && isNaN(new Date(createdAt).getTime())) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid createdAt date",
+      });
+    }
+
+    /* ===============================
+       FIND ATTENDANCE DOC
+    =============================== */
     const attendance = await Attendance.findById(attendanceId)
       .populate("project")
       .populate("user");
@@ -359,53 +624,45 @@ export const adminEditAttendance = async (req, res) => {
       });
     }
 
-    const project = attendance.project;
-    const userId = attendance.user?._id?.toString();
+    /* ===============================
+       FIND HISTORY BY _id (ONLY)
+    =============================== */
+    const historyEntry = attendance.history.id(String(historyId));
 
-    if (!project || !userId) {
-      return res.status(400).json({
+    if (!historyEntry) {
+      return res.status(404).json({
         success: false,
-        message: "Invalid attendance record",
+        message: "History entry not found",
       });
     }
 
-    // CHECK IF USER BELONGS TO THIS PROJECT
-    const isUserSiteManager = project.site_manager?.toString() === userId;
-    const isUserLabour = project.labour?.some((id) => id.toString() === userId);
-
-    if (!isUserSiteManager && !isUserLabour) {
-      return res.status(401).json({
-        success: false,
-        message: "User is not associated with this project",
-      });
+    /* ===============================
+       APPLY EDITS
+    =============================== */
+    if (attendanceType) {
+      historyEntry.attendanceType = attendanceType;
     }
 
-    // HISTORY INDEX VALIDATION
-    if (
-      !attendance.history ||
-      historyIndex < 0 ||
-      historyIndex >= attendance.history.length
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid history index",
-      });
+    if (createdAt) {
+      historyEntry.createdAt = new Date(createdAt);
     }
 
-    // APPLY EDIT
-    attendance.history[historyIndex].attendanceType = attendanceType;
-    attendance.history[historyIndex].editedByAdmin = true;
-    attendance.history[historyIndex].editedAt = new Date();
+    historyEntry.editedByAdmin = true;
+    historyEntry.editedAt = new Date();
 
     await attendance.save();
 
-    return res.json({
+    /* ===============================
+       FINAL RESPONSE
+    =============================== */
+    return res.status(200).json({
       success: true,
-      message: "Attendance updated successfully",
-      history: attendance.history,
+      message: "Attendance history updated successfully",
+      updatedHistory: historyEntry,
+      fullHistory: attendance.history,
     });
   } catch (err) {
-    console.error("Admin Edit Attendance Error:", err);
+    console.error("🔥 Admin Edit Attendance Error:", err);
     return res.status(500).json({
       success: false,
       message: err.message,
@@ -467,21 +724,42 @@ export const getProjectTimeline = async (req, res) => {
 
 export const adminAddAttendanceForUser = async (req, res) => {
   try {
-    const { userId, attendanceType, coordinates, createdAt } = req.body;
+    console.log("🔵 Admin Add Attendance API called");
+
+    const { userId, projectId, attendanceType, coordinates, createdAt } =
+      req.body;
+
+    console.log("➡️ Request Body:", req.body);
+    console.log("➡️ Logged-in User:", {
+      id: req.user?._id,
+      role: req.user?.role,
+    });
+
+    /* ===============================
+       AUTH
+    =============================== */
     if (!req.user || req.user.role !== "super_admin") {
+      console.log("❌ Unauthorized access");
       return res.status(403).json({
         success: false,
         message: "Only super admin can add attendance",
       });
     }
-    if (!userId || !attendanceType || !coordinates) {
+
+    /* ===============================
+       BASIC VALIDATION
+    =============================== */
+    if (!userId || !projectId || !attendanceType || !coordinates) {
+      console.log("❌ Missing required fields");
       return res.status(400).json({
         success: false,
-        message: "userId, attendanceType and coordinates are required",
+        message:
+          "userId, projectId, attendanceType and coordinates are required",
       });
     }
 
     if (!["check-in", "check-out"].includes(attendanceType)) {
+      console.log("❌ Invalid attendanceType:", attendanceType);
       return res.status(400).json({
         success: false,
         message: "attendanceType must be check-in or check-out",
@@ -489,26 +767,59 @@ export const adminAddAttendanceForUser = async (req, res) => {
     }
 
     if (!Array.isArray(coordinates) || coordinates.length !== 2) {
+      console.log("❌ Invalid coordinates:", coordinates);
       return res.status(400).json({
         success: false,
         message: "coordinates must be [longitude, latitude]",
       });
     }
-    const project = await Project.findOne({
-      $or: [{ site_manager: userId }, { labour: userId }],
-      projectStatus: { $ne: "completed" },
-    });
+
+    /* ===============================
+       FIND PROJECT (FIXED)
+    =============================== */
+    console.log("🔍 Finding project by projectId:", projectId);
+
+    const project = await Project.findById(projectId);
+
+    console.log("📦 Project found:", project);
 
     if (!project) {
+      console.log("❌ Project not found");
       return res.status(404).json({
         success: false,
-        message: "No active project found for this user",
+        message: "Project not found",
       });
     }
+
+    /* ===============================
+       VALIDATE USER IN PROJECT
+    =============================== */
+    const isUserInProject =
+      project.site_manager?.toString() === userId ||
+      project.labour?.map(String).includes(userId);
+
+    console.log("👤 Is user in project:", isUserInProject);
+
+    if (!isUserInProject) {
+      console.log("❌ User not part of project");
+      return res.status(400).json({
+        success: false,
+        message: "User does not belong to this project",
+      });
+    }
+
+    /* ===============================
+       FIND / CREATE ATTENDANCE DOC
+    =============================== */
     let attendanceDoc = await Attendance.findOne({
       user: userId,
       project: project._id,
     });
+
+    console.log(
+      "📘 Existing attendance doc:",
+      attendanceDoc ? "FOUND" : "NOT FOUND",
+    );
 
     if (!attendanceDoc) {
       attendanceDoc = await Attendance.create({
@@ -516,50 +827,90 @@ export const adminAddAttendanceForUser = async (req, res) => {
         project: project._id,
         history: [],
       });
+      console.log("📘 New attendance document created");
     }
 
-    const history = attendanceDoc.history;
-    const lastEntry = history[history.length - 1];
+    /* ===============================
+       DATE & TIME LOGIC
+    =============================== */
+    const entryDate = createdAt ? new Date(createdAt) : new Date();
 
-    if (
-      attendanceType === "check-in" &&
-      lastEntry?.attendanceType === "check-in"
-    ) {
+    const dayStart = new Date(entryDate);
+    dayStart.setUTCHours(0, 0, 0, 0);
+
+    const dayEnd = new Date(entryDate);
+    dayEnd.setUTCHours(23, 59, 59, 999);
+
+    console.log("🕒 Entry Date:", entryDate.toISOString());
+    console.log("📅 Day Start:", dayStart.toISOString());
+    console.log("📅 Day End:", dayEnd.toISOString());
+
+    const dayHistory = attendanceDoc.history
+      .filter((h) => {
+        const t = new Date(h.createdAt);
+        return t >= dayStart && t <= dayEnd;
+      })
+      .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+
+    console.log("📜 Day history count:", dayHistory.length);
+
+    const lastEntryOfDay = dayHistory[dayHistory.length - 1];
+
+    /* ===============================
+       VALIDATIONS
+    =============================== */
+
+    // ⏱ time must move forward
+    if (lastEntryOfDay) {
+      const lastTime = new Date(lastEntryOfDay.createdAt);
+      if (entryDate <= lastTime) {
+        console.log("❌ Time is earlier than last entry");
+        return res.status(400).json({
+          success: false,
+          message:
+            "Attendance time must be later than the previous entry for this date",
+        });
+      }
+    }
+
+    // 🔁 same type twice
+    if (lastEntryOfDay && lastEntryOfDay.attendanceType === attendanceType) {
+      console.log("❌ Same attendance type twice");
       return res.status(400).json({
         success: false,
-        message: "User is already checked in. Please add check-out first.",
+        message: `Cannot add ${attendanceType} twice in a row for the same date`,
       });
     }
 
-    if (attendanceType === "check-out" && !lastEntry) {
+    // ❌ checkout without checkin
+    if (!lastEntryOfDay && attendanceType === "check-out") {
+      console.log("❌ Checkout without check-in");
       return res.status(400).json({
         success: false,
-        message: "Cannot check-out without a check-in",
+        message: "Cannot check-out without a check-in for this date",
       });
     }
 
-    if (
-      attendanceType === "check-out" &&
-      lastEntry?.attendanceType === "check-out"
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "User is already checked out",
-      });
-    }
-    history.push({
+    /* ===============================
+       PUSH ENTRY
+    =============================== */
+    const newEntry = {
       attendanceType,
       selfieImage: "admin-entry",
       location: {
         type: "Point",
         coordinates,
       },
-      createdAt: createdAt ? new Date(createdAt) : new Date(),
+      createdAt: entryDate,
       editedByAdmin: true,
       editedAt: new Date(),
-    });
+    };
 
+    attendanceDoc.history.push(newEntry);
     await attendanceDoc.save();
+
+    console.log("✅ Attendance added successfully");
+
     return res.status(201).json({
       success: true,
       message: "Attendance added successfully by admin",
@@ -567,18 +918,17 @@ export const adminAddAttendanceForUser = async (req, res) => {
         id: project._id,
         name: project.projectName,
       },
-      lastEntry: history[history.length - 1],
-      fullHistory: history,
+      addedEntry: newEntry,
+      fullHistory: attendanceDoc.history,
     });
   } catch (error) {
-    console.error("Admin Add Attendance Error:", error);
+    console.error("🔥 Admin Add Attendance Error:", error);
     return res.status(500).json({
       success: false,
       message: error.message,
     });
   }
 };
-
 export const deleteAttendanceRecord = async (req, res) => {
   try {
     const { attendanceId, historyIndex } = req.body; // Now using historyIndex instead of index
@@ -615,7 +965,7 @@ export const deleteAttendanceRecord = async (req, res) => {
     return res.status(200).json({
       success: true,
       message: "Attendance record deleted successfully",
-      deletedEntry: historyEntry, // Optional: return the deleted entry
+      deletedEntry: historyEntry,
     });
   } catch (error) {
     console.error("Delete Attendance Error:", error);
