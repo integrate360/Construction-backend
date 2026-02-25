@@ -152,7 +152,6 @@ export const getMyAttendance = async (req, res) => {
   }
 };
 
-
 export const getProjectAttendance = async (req, res) => {
   try {
     const { date, from, to, userId } = req.query;
@@ -216,14 +215,15 @@ export const getProjectAttendance = async (req, res) => {
       const fromDate = new Date(from);
       const toDate = new Date(to);
       const daysDiff = Math.ceil((toDate - fromDate) / (1000 * 60 * 60 * 24));
-      
+
       if (daysDiff > 90) {
         return res.status(400).json({
           success: false,
-          message: "Date range cannot exceed 90 days. Please use a smaller range.",
+          message:
+            "Date range cannot exceed 90 days. Please use a smaller range.",
         });
       }
-      
+
       startDate = new Date(`${from}T00:00:00.000Z`);
       endDate = new Date(`${to}T23:59:59.999Z`);
     } else {
@@ -238,7 +238,7 @@ export const getProjectAttendance = async (req, res) => {
        CREATE ATTENDANCE MAP FOR ALL USERS
     =============================== */
     const attendanceByUser = {};
-    attendanceDocs.forEach(doc => {
+    attendanceDocs.forEach((doc) => {
       attendanceByUser[doc.user._id.toString()] = doc;
     });
 
@@ -246,13 +246,13 @@ export const getProjectAttendance = async (req, res) => {
        COLLECT ALL DATES THAT HAVE ATTENDANCE
     =============================== */
     const attendanceDatesSet = new Set();
-    
+
     // Collect all unique dates from history within the range
-    attendanceDocs.forEach(doc => {
-      doc.history.forEach(entry => {
+    attendanceDocs.forEach((doc) => {
+      doc.history.forEach((entry) => {
         const entryDate = new Date(entry.createdAt);
         if (entryDate >= startDate && entryDate <= endDate) {
-          const dateStr = entryDate.toISOString().split('T')[0];
+          const dateStr = entryDate.toISOString().split("T")[0];
           attendanceDatesSet.add(dateStr);
         }
       });
@@ -260,7 +260,7 @@ export const getProjectAttendance = async (req, res) => {
 
     // Convert set to sorted array of dates that have attendance
     const activeDates = Array.from(attendanceDatesSet).sort();
-    
+
     console.log("📅 Active Dates (with attendance):", activeDates);
 
     /* ===============================
@@ -273,9 +273,9 @@ export const getProjectAttendance = async (req, res) => {
     for (const user of users) {
       const userId = user._id.toString();
       const attendanceDoc = attendanceByUser[userId];
-      
+
       // Initialize days array with ONLY active dates (dates that have attendance)
-      const days = activeDates.map(date => ({
+      const days = activeDates.map((date) => ({
         date,
         status: "absent", // Default to absent
         history: [],
@@ -286,26 +286,29 @@ export const getProjectAttendance = async (req, res) => {
       // If user has attendance records, update the present days
       if (attendanceDoc) {
         const attendanceId = attendanceDoc._id;
-        
+
         // Process each active date
         for (let i = 0; i < days.length; i++) {
           const dateStr = days[i].date;
           const dayStart = new Date(`${dateStr}T00:00:00.000Z`);
           const dayEnd = new Date(`${dateStr}T23:59:59.999Z`);
-          
+
           // Get history for this specific date
-          const dayHistory = attendanceDoc.history.filter(h => {
+          const dayHistory = attendanceDoc.history.filter((h) => {
             const hDate = new Date(h.createdAt);
             return hDate >= dayStart && hDate <= dayEnd;
           });
-          
+
           if (dayHistory.length > 0) {
             // Sort history entries
-            dayHistory.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-            
+            dayHistory.sort(
+              (a, b) => new Date(a.createdAt) - new Date(b.createdAt),
+            );
+
             // Calculate working time
-            const { totalMinutes, totalHours } = calculateTotalWorkingTime(dayHistory);
-            
+            const { totalMinutes, totalHours } =
+              calculateTotalWorkingTime(dayHistory);
+
             days[i].status = "present";
             days[i].history = dayHistory;
             days[i].totalWorkingMinutes = totalMinutes;
@@ -323,7 +326,7 @@ export const getProjectAttendance = async (req, res) => {
           },
           project: projectId,
           days: days,
-          hasAttendance: true
+          hasAttendance: true,
         });
       } else {
         // For users without any attendance records, create a record with all days absent
@@ -336,7 +339,7 @@ export const getProjectAttendance = async (req, res) => {
           },
           project: projectId,
           days: days, // All active dates marked as absent
-          hasAttendance: false
+          hasAttendance: false,
         });
       }
     }
@@ -350,11 +353,10 @@ export const getProjectAttendance = async (req, res) => {
       totalRecords: attendanceRecords.length,
       totalDays: activeDates.length, // Now this is only days with attendance
       dateRange: {
-        from: startDate.toISOString().split('T')[0],
-        to: endDate.toISOString().split('T')[0]
-      }
+        from: startDate.toISOString().split("T")[0],
+        to: endDate.toISOString().split("T")[0],
+      },
     });
-    
   } catch (error) {
     console.error("🔥 Get Project Attendance Error:", error);
     return res.status(500).json({
@@ -973,5 +975,191 @@ export const deleteAttendanceRecord = async (req, res) => {
       success: false,
       message: error.message,
     });
+  }
+};
+
+export const getProjectAttendanceAdmin = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const { date, viewMode = "daily" } = req.query;
+
+    let startDate, endDate;
+
+    // ----------------------------
+    // DATE FILTER RANGE
+    // ----------------------------
+    if (date) {
+      const selectedDate = new Date(date);
+
+      if (viewMode === "daily") {
+        startDate = new Date(selectedDate);
+        startDate.setHours(0, 0, 0, 0);
+        endDate = new Date(selectedDate);
+        endDate.setHours(23, 59, 59, 999);
+      } else if (viewMode === "weekly") {
+        const day = selectedDate.getDay();
+        const diffToMonday = day === 0 ? -6 : 1 - day;
+
+        startDate = new Date(selectedDate);
+        startDate.setDate(selectedDate.getDate() + diffToMonday);
+        startDate.setHours(0, 0, 0, 0);
+
+        endDate = new Date(startDate);
+        endDate.setDate(startDate.getDate() + 6);
+        endDate.setHours(23, 59, 59, 999);
+      } else if (viewMode === "monthly") {
+        startDate = new Date(
+          selectedDate.getFullYear(),
+          selectedDate.getMonth(),
+          1,
+        );
+        startDate.setHours(0, 0, 0, 0);
+        endDate = new Date(
+          selectedDate.getFullYear(),
+          selectedDate.getMonth() + 1,
+          0,
+        );
+        endDate.setHours(23, 59, 59, 999);
+      }
+    }
+
+    // ----------------------------
+    // QUERY FILTER (only for selecting records)
+    // ----------------------------
+    const query = { project: projectId };
+    if (startDate && endDate) {
+      query["history.createdAt"] = { $gte: startDate, $lte: endDate };
+    }
+
+    const attendance = await Attendance.find(query)
+      .populate("user", "name phoneNumber")
+      .sort({ createdAt: -1 });
+
+    // ----------------------------
+    // GROUP BY USER & COLLECT FULL HISTORY
+    // ----------------------------
+    const projectAttendance = {};
+
+    attendance.forEach((record) => {
+      const userId = record.user._id.toString();
+
+      if (!projectAttendance[userId]) {
+        projectAttendance[userId] = {
+          user: record.user,
+          attendance: [], // filtered docs list
+          fullHistory: [], // all-time history
+        };
+      }
+
+      // Always add full history (never filter it)
+      if (record.history) {
+        record.history.forEach((h) =>
+          projectAttendance[userId].fullHistory.push(h),
+        );
+      }
+
+      // Add full record to attendance list (not filtered!)
+      projectAttendance[userId].attendance.push({
+        ...record.toObject(),
+        history: record.history, // ALL TIME
+      });
+    });
+
+    // ----------------------------
+    // COMPUTE SUMMARY + WORKING TIME
+    // ----------------------------
+    Object.keys(projectAttendance).forEach((userId) => {
+      const userData = projectAttendance[userId];
+
+      // FULL history (for summary)
+      const fullHistory = [...userData.fullHistory].sort(
+        (a, b) => new Date(a.createdAt) - new Date(b.createdAt),
+      );
+
+      // FILTERED history (for workingTime only)
+      const rangeHistory = fullHistory.filter((h) => {
+        if (!startDate || !endDate) return true;
+        const d = new Date(h.createdAt);
+        return d >= startDate && d <= endDate;
+      });
+
+      // ----------------------------
+      // WORKING TIME (FILTERED)
+      // ----------------------------
+      let totalMinutes = 0;
+      let lastCheckIn = null;
+
+      rangeHistory.forEach((record) => {
+        if (record.attendanceType === "check-in") {
+          if (!lastCheckIn) lastCheckIn = record;
+        } else if (record.attendanceType === "check-out" && lastCheckIn) {
+          const diff =
+            new Date(record.createdAt) - new Date(lastCheckIn.createdAt);
+          const mins = Math.floor(diff / (1000 * 60));
+          if (mins > 0 && mins < 960) totalMinutes += mins;
+          lastCheckIn = null;
+        }
+      });
+
+      userData.workingTime = {
+        totalMinutes,
+        totalHours: parseFloat((totalMinutes / 60).toFixed(2)),
+        formatted: `${Math.floor(totalMinutes / 60)}h ${totalMinutes % 60}m`,
+      };
+
+      // ----------------------------
+      // DAILY WORKING TIME (ALL TIME)
+      // ----------------------------
+      const historyPerDay = {};
+      fullHistory.forEach((h) => {
+        const d = new Date(h.createdAt).toISOString().split("T")[0];
+        if (!historyPerDay[d]) historyPerDay[d] = [];
+        historyPerDay[d].push(h);
+      });
+
+      const dailyWorkingTime = {};
+      Object.keys(historyPerDay).forEach((d) => {
+        const dayRecs = historyPerDay[d].sort(
+          (a, b) => new Date(a.createdAt) - new Date(b.createdAt),
+        );
+        let mins = 0,
+          dayIn = null;
+
+        dayRecs.forEach((r) => {
+          if (r.attendanceType === "check-in") {
+            if (!dayIn) dayIn = r;
+          } else if (r.attendanceType === "check-out" && dayIn) {
+            const diff = new Date(r.createdAt) - new Date(dayIn.createdAt);
+            const m = Math.floor(diff / (1000 * 60));
+            if (m >= 1 && m < 960) mins += m;
+            dayIn = null;
+          }
+        });
+
+        dailyWorkingTime[d] = {
+          totalMinutes: mins,
+          totalHours: parseFloat((mins / 60).toFixed(2)),
+          formatted: `${Math.floor(mins / 60)}h ${mins % 60}m`,
+        };
+      });
+
+      // ----------------------------
+      // PRESENT DAYS (ALL TIME)
+      // ----------------------------
+      const uniqueDates = Object.keys(historyPerDay);
+
+      userData.attendanceSummary = {
+        presentDaysCount: uniqueDates.length,
+        presentDates: uniqueDates,
+        dailyWorkingTime,
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      attendance: projectAttendance,
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
   }
 };
