@@ -49,12 +49,78 @@ export const createSalaryStructure = async (req, res) => {
 
 export const getAllSalaryStructures = async (req, res) => {
   try {
-    const { project, user, role, isActive } = req.query;
+    const {
+      project,
+      user,
+      role,
+      isActive,
+      salaryType,
+      search,
+      minRate,
+      maxRate,
+      effectiveFrom,
+      effectiveTo,
+      sortBy = "createdAt",
+      sortOrder = "desc",
+    } = req.query;
+
+    // Pagination
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
     const filter = {};
     if (project) filter.project = project;
     if (user) filter.user = user;
     if (role) filter.role = role;
+    if (salaryType) filter.salaryType = salaryType;
     if (isActive !== undefined) filter.isActive = isActive === "true";
+
+    // Rate range filter
+    if (minRate || maxRate) {
+      filter.rateAmount = {};
+      if (minRate) filter.rateAmount.$gte = Number(minRate);
+      if (maxRate) filter.rateAmount.$lte = Number(maxRate);
+    }
+
+    // Effective date range filter
+    if (effectiveFrom) filter.effectiveFrom = { $gte: new Date(effectiveFrom) };
+    if (effectiveTo) filter.effectiveTo = { $lte: new Date(effectiveTo) };
+
+    // Sort
+    const sortOptions = {};
+    sortOptions[sortBy] = sortOrder === "asc" ? 1 : -1;
+
+    // If search is provided, first find matching users
+    let userIds = [];
+    if (search) {
+      const UserModel = mongoose.model("User");
+      const matchingUsers = await UserModel.find({
+        $or: [
+          { name: { $regex: search, $options: "i" } },
+          { email: { $regex: search, $options: "i" } },
+          { phoneNumber: { $regex: search, $options: "i" } },
+        ],
+      }).select("_id");
+      userIds = matchingUsers.map((u) => u._id);
+
+      // Also search by project name
+      const ProjectModel = mongoose.model("Project");
+      const matchingProjects = await ProjectModel.find({
+        $or: [
+          { projectName: { $regex: search, $options: "i" } },
+          { siteName: { $regex: search, $options: "i" } },
+        ],
+      }).select("_id");
+      const projectIds = matchingProjects.map((p) => p._id);
+
+      filter.$or = [
+        { user: { $in: userIds } },
+        { project: { $in: projectIds } },
+      ];
+    }
+
+    const totalDocuments = await SalaryStructure.countDocuments(filter);
 
     const structures = await SalaryStructure.find(filter)
       .populate({
@@ -71,11 +137,16 @@ export const getAllSalaryStructures = async (req, res) => {
         ],
       })
       .populate("createdBy", "name email role profilePicture")
-      .sort({ createdAt: -1 });
+      .sort(sortOptions)
+      .skip(skip)
+      .limit(limit);
 
     res.status(200).json({
       success: true,
       count: structures.length,
+      totalDocuments,
+      currentPage: page,
+      totalPages: Math.ceil(totalDocuments / limit),
       data: structures,
     });
   } catch (error) {
@@ -222,7 +293,6 @@ export const generatePayroll = async (req, res) => {
       periodStart,
       periodEnd,
     });
-
     if (exists) {
       return res.status(400).json({
         success: false,
@@ -236,7 +306,6 @@ export const generatePayroll = async (req, res) => {
       project,
       isActive: true,
     });
-
     if (!structure) {
       return res.status(404).json({
         success: false,
@@ -440,21 +509,81 @@ export const generateBulkPayroll = async (req, res) => {
 
 export const getAllPayrolls = async (req, res) => {
   try {
-    const { project, user, role, paymentStatus, periodStart, periodEnd } = req.query;
+    const {
+      project,
+      user,
+      role,
+      paymentStatus,
+      periodStart,
+      periodEnd,
+      search,
+      paymentMode,
+      minNetSalary,
+      maxNetSalary,
+      minGrossSalary,
+      maxGrossSalary,
+      sortBy = "createdAt",
+      sortOrder = "desc",
+    } = req.query;
 
     // Pagination
-    const page  = parseInt(req.query.page)  || 1;
+    const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
-    const skip  = (page - 1) * limit;
+    const skip = (page - 1) * limit;
 
     const filter = {};
-
     if (project) filter.project = project;
     if (user) filter.user = user;
     if (role) filter.role = role;
     if (paymentStatus) filter.paymentStatus = paymentStatus;
+    if (paymentMode) filter.paymentMode = paymentMode;
     if (periodStart) filter.periodStart = { $gte: new Date(periodStart) };
     if (periodEnd) filter.periodEnd = { $lte: new Date(periodEnd) };
+
+    // Salary range filters
+    if (minNetSalary || maxNetSalary) {
+      filter.netSalary = {};
+      if (minNetSalary) filter.netSalary.$gte = Number(minNetSalary);
+      if (maxNetSalary) filter.netSalary.$lte = Number(maxNetSalary);
+    }
+    if (minGrossSalary || maxGrossSalary) {
+      filter.grossSalary = {};
+      if (minGrossSalary) filter.grossSalary.$gte = Number(minGrossSalary);
+      if (maxGrossSalary) filter.grossSalary.$lte = Number(maxGrossSalary);
+    }
+
+    // Search by user name/email or project name
+    if (search) {
+      const UserModel = mongoose.model("User");
+      const matchingUsers = await UserModel.find({
+        $or: [
+          { name: { $regex: search, $options: "i" } },
+          { email: { $regex: search, $options: "i" } },
+          { phoneNumber: { $regex: search, $options: "i" } },
+        ],
+      }).select("_id");
+      const userIds = matchingUsers.map((u) => u._id);
+
+      const ProjectModel = mongoose.model("Project");
+      const matchingProjects = await ProjectModel.find({
+        $or: [
+          { projectName: { $regex: search, $options: "i" } },
+          { siteName: { $regex: search, $options: "i" } },
+        ],
+      }).select("_id");
+      const projectIds = matchingProjects.map((p) => p._id);
+
+      filter.$or = [
+        { user: { $in: userIds } },
+        { project: { $in: projectIds } },
+        { remarks: { $regex: search, $options: "i" } },
+        { transactionReference: { $regex: search, $options: "i" } },
+      ];
+    }
+
+    // Sort
+    const sortOptions = {};
+    sortOptions[sortBy] = sortOrder === "asc" ? 1 : -1;
 
     // Count total documents for pagination
     const totalDocuments = await Payroll.countDocuments(filter);
@@ -477,7 +606,7 @@ export const getAllPayrolls = async (req, res) => {
         select: "salaryType rateAmount overtimeRate effectiveFrom",
       })
       .populate("createdBy", "name email role")
-      .sort({ createdAt: -1 })
+      .sort(sortOptions)
       .skip(skip)
       .limit(limit);
 
@@ -487,8 +616,11 @@ export const getAllPayrolls = async (req, res) => {
       totalNetSalary: payrolls.reduce((sum, p) => sum + p.netSalary, 0),
       totalGrossSalary: payrolls.reduce((sum, p) => sum + p.grossSalary, 0),
       totalPaid: payrolls.filter((p) => p.paymentStatus === "paid").length,
-      totalPending: payrolls.filter((p) => p.paymentStatus === "pending").length,
-      totalPartiallyPaid: payrolls.filter((p) => p.paymentStatus === "partially_paid").length,
+      totalPending: payrolls.filter((p) => p.paymentStatus === "pending")
+        .length,
+      totalPartiallyPaid: payrolls.filter(
+        (p) => p.paymentStatus === "partially_paid",
+      ).length,
     };
 
     res.status(200).json({
@@ -500,7 +632,6 @@ export const getAllPayrolls = async (req, res) => {
       summary,
       data: payrolls,
     });
-
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -568,7 +699,6 @@ export const getPayrollById = async (req, res) => {
 export const updatePayroll = async (req, res) => {
   try {
     const payroll = await Payroll.findById(req.params.id);
-
     if (!payroll) {
       return res.status(404).json({
         success: false,
@@ -748,7 +878,6 @@ export const getProjectPayrollSummary = async (req, res) => {
 export const deletePayroll = async (req, res) => {
   try {
     const payroll = await Payroll.findById(req.params.id);
-
     if (!payroll) {
       return res.status(404).json({
         success: false,
@@ -764,7 +893,6 @@ export const deletePayroll = async (req, res) => {
     }
 
     await payroll.deleteOne();
-
     res.status(200).json({
       success: true,
       message: "Payroll deleted successfully",
@@ -811,12 +939,76 @@ export const giveAdvance = async (req, res) => {
 
 export const getAllAdvances = async (req, res) => {
   try {
-    const { project, user, recoveryStatus } = req.query;
-    const filter = {};
+    const {
+      project,
+      user,
+      recoveryStatus,
+      search,
+      minAmount,
+      maxAmount,
+      givenDateFrom,
+      givenDateTo,
+      sortBy = "givenDate",
+      sortOrder = "desc",
+    } = req.query;
 
+    // Pagination
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    const filter = {};
     if (project) filter.project = project;
     if (user) filter.user = user;
     if (recoveryStatus) filter.recoveryStatus = recoveryStatus;
+
+    // Amount range filter
+    if (minAmount || maxAmount) {
+      filter.amount = {};
+      if (minAmount) filter.amount.$gte = Number(minAmount);
+      if (maxAmount) filter.amount.$lte = Number(maxAmount);
+    }
+
+    // Date range filter
+    if (givenDateFrom || givenDateTo) {
+      filter.givenDate = {};
+      if (givenDateFrom) filter.givenDate.$gte = new Date(givenDateFrom);
+      if (givenDateTo) filter.givenDate.$lte = new Date(givenDateTo);
+    }
+
+    // Search by user name/email or reason
+    if (search) {
+      const UserModel = mongoose.model("User");
+      const matchingUsers = await UserModel.find({
+        $or: [
+          { name: { $regex: search, $options: "i" } },
+          { email: { $regex: search, $options: "i" } },
+          { phoneNumber: { $regex: search, $options: "i" } },
+        ],
+      }).select("_id");
+      const userIds = matchingUsers.map((u) => u._id);
+
+      const ProjectModel = mongoose.model("Project");
+      const matchingProjects = await ProjectModel.find({
+        $or: [
+          { projectName: { $regex: search, $options: "i" } },
+          { siteName: { $regex: search, $options: "i" } },
+        ],
+      }).select("_id");
+      const projectIds = matchingProjects.map((p) => p._id);
+
+      filter.$or = [
+        { user: { $in: userIds } },
+        { project: { $in: projectIds } },
+        { reason: { $regex: search, $options: "i" } },
+      ];
+    }
+
+    // Sort
+    const sortOptions = {};
+    sortOptions[sortBy] = sortOrder === "asc" ? 1 : -1;
+
+    const totalDocuments = await Advance.countDocuments(filter);
 
     const advances = await Advance.find(filter)
       .populate({
@@ -833,7 +1025,9 @@ export const getAllAdvances = async (req, res) => {
         ],
       })
       .populate("createdBy", "name email role")
-      .sort({ givenDate: -1 });
+      .sort(sortOptions)
+      .skip(skip)
+      .limit(limit);
 
     // Calculate summary
     const summary = {
@@ -857,6 +1051,9 @@ export const getAllAdvances = async (req, res) => {
     res.status(200).json({
       success: true,
       count: advances.length,
+      totalDocuments,
+      currentPage: page,
+      totalPages: Math.ceil(totalDocuments / limit),
       summary,
       data: advances,
     });
@@ -930,7 +1127,7 @@ export const getUserAdvances = async (req, res) => {
     const totalGiven = advances.reduce((sum, a) => sum + a.amount, 0);
     const totalRecovered = advances.reduce(
       (sum, a) => sum + a.amountRecovered,
-      0
+      0,
     );
     const totalPending = totalGiven - totalRecovered;
 
@@ -942,11 +1139,10 @@ export const getUserAdvances = async (req, res) => {
         totalRecovered,
         totalPending,
         advanceCount: advances.length,
-        fullyRecovered: advances.filter(
-          (a) => a.recoveryStatus === "recovered"
-        ).length,
+        fullyRecovered: advances.filter((a) => a.recoveryStatus === "recovered")
+          .length,
         partiallyRecovered: advances.filter(
-          (a) => a.recoveryStatus === "partially_recovered"
+          (a) => a.recoveryStatus === "partially_recovered",
         ).length,
         pending: advances.filter((a) => a.recoveryStatus === "pending").length,
       },
@@ -959,8 +1155,8 @@ export const getUserAdvances = async (req, res) => {
 export const recoverAdvance = async (req, res) => {
   try {
     const { amountToRecover } = req.body;
-    const advance = await Advance.findById(req.params.id);
 
+    const advance = await Advance.findById(req.params.id);
     if (!advance) {
       return res.status(404).json({
         success: false,
@@ -1010,7 +1206,6 @@ export const recoverAdvance = async (req, res) => {
 export const updateAdvance = async (req, res) => {
   try {
     const advance = await Advance.findById(req.params.id);
-
     if (!advance) {
       return res.status(404).json({
         success: false,
@@ -1027,7 +1222,6 @@ export const updateAdvance = async (req, res) => {
     }
 
     const { amount, reason, givenDate } = req.body;
-
     if (amount !== undefined) advance.amount = amount;
     if (reason !== undefined) advance.reason = reason;
     if (givenDate !== undefined) advance.givenDate = givenDate;
@@ -1049,7 +1243,6 @@ export const updateAdvance = async (req, res) => {
 export const deleteAdvance = async (req, res) => {
   try {
     const advance = await Advance.findById(req.params.id);
-
     if (!advance) {
       return res.status(404).json({
         success: false,
@@ -1065,7 +1258,6 @@ export const deleteAdvance = async (req, res) => {
     }
 
     await advance.deleteOne();
-
     res.status(200).json({
       success: true,
       message: "Advance deleted successfully",
@@ -1164,20 +1356,19 @@ export const getProjectAdvanceSummary = async (req, res) => {
   }
 };
 
-
-
 export const downloadSalarySlip = async (req, res) => {
   try {
     const payroll = await Payroll.findById(req.params.id)
       .populate({
         path: "user",
-        select: "name email role phoneNumber profilePicture adharNumber panNumber",
+        select:
+          "name email role phoneNumber profilePicture adharNumber panNumber",
       })
       .populate({
         path: "project",
         select: "projectName siteName location client site_manager",
         populate: [
-          { path: "client",       select: "name email phoneNumber companyName" },
+          { path: "client", select: "name email phoneNumber companyName" },
           { path: "site_manager", select: "name email phoneNumber" },
         ],
       })
@@ -1188,7 +1379,9 @@ export const downloadSalarySlip = async (req, res) => {
       .populate("createdBy", "name email role");
 
     if (!payroll) {
-      return res.status(404).json({ success: false, message: "Payroll not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Payroll not found" });
     }
 
     // Stream the PDF directly to the client
@@ -1213,7 +1406,8 @@ export const getProjectUsers = async (req, res) => {
     }
 
     // Find project and populate both site_manager and labour fields
-    const project = await projectModel.findById(projectId) // Using projectModel
+    const project = await projectModel
+      .findById(projectId)
       .populate({
         path: "site_manager",
         select: "name email phone role profileImage",
@@ -1230,9 +1424,7 @@ export const getProjectUsers = async (req, res) => {
       });
     }
 
-    // Rest of the code remains the same...
     const allUsers = [];
-
     if (project.site_manager) {
       allUsers.push({
         ...project.site_manager.toObject(),
@@ -1241,7 +1433,7 @@ export const getProjectUsers = async (req, res) => {
     }
 
     if (project.labour && project.labour.length > 0) {
-      const labourUsers = project.labour.map(labour => ({
+      const labourUsers = project.labour.map((labour) => ({
         ...labour.toObject(),
         userType: "labour",
       }));
