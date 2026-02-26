@@ -1,112 +1,147 @@
 import PDFDocument from "pdfkit";
-import path from "path";
-
-/**
- * generateSalarySlipPDF
- * ─────────────────────
- * Drop-in replacement. Requires DejaVu Sans fonts in src/fonts/ for ₹ support.
- * Download from: https://dejavu-fonts.github.io/
- * Place DejaVuSans.ttf + DejaVuSans-Bold.ttf into src/fonts/
- */
-
-const FONT_DIR  = path.resolve("src/fonts");
-const FONT_REG  = path.join(FONT_DIR, "DejaVuSans.ttf");
-const FONT_BOLD = path.join(FONT_DIR, "DejaVuSans-Bold.ttf");
 
 const fmt = (n) =>
-  "\u20B9" + Number(n || 0).toLocaleString("en-IN", {
+  "₹" +
+  Number(n || 0).toLocaleString("en-IN", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
 
 const fmtDate = (d) =>
-  d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—";
+  d
+    ? new Date(d).toLocaleDateString("en-IN", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      })
+    : "—";
 
+// ─── PROFESSIONAL COLOR PALETTE ───────────────────────────────────────────────
 const C = {
-  navy:     "#0D1B2A", navy2:   "#162840",
-  gold:     "#C9A84C", goldLt:  "#F9F0D8", goldMid: "#E8CC88",
-  teal:     "#1B6CA8", tealLt:  "#EBF5FF",
-  slate:    "#3A4A5C", slateL:  "#6B7A8D",
-  smoke:    "#F4F7FA", white:   "#FFFFFF",
-  border:   "#C8D6E8", shadow:  "#C8D4E0", muted: "#8FA8C0",
-  green:    "#1A7A4A", greenLt: "#EAF6F0", greenBar: "#B2DEC8",
-  red:      "#B02A2A", redLt:   "#FDF0F0", redBar:   "#E8B8B8",
-  footer:   "#EEF3F8",
+  navy:      "#0D1B2A",   // Deep navy – header bg
+  gold:      "#C9A84C",   // Gold accent
+  goldLt:    "#F5E6C0",   // Light gold tint
+  teal:      "#1B6CA8",   // Section headers
+  tealLt:    "#E8F4FD",   // Table alt rows
+  slate:     "#445566",   // Body text
+  smoke:     "#F7F9FB",   // Light bg
+  white:     "#FFFFFF",
+  border:    "#CBD8E5",
+  green:     "#1A7A4A",
+  greenLt:   "#E6F5EE",
+  greenBar:  "#A8D5B5",
+  red:       "#B02A2A",
+  redLt:     "#FDEAEA",
+  redBar:    "#E8AAAA",
+  footer:    "#EEF3F8",
+  divider:   "#D0DCE8",
+  mutedBlue: "#A0B8CC",
 };
 
 export function generateSalarySlipPDF(payroll, res) {
+  // ─── Setup ──────────────────────────────────────────────────────────────────
   const doc = new PDFDocument({
     size: "A4",
     margins: { top: 0, bottom: 0, left: 0, right: 0 },
-    info: { Title: `Salary Slip – ${payroll._id}`, Author: "Payroll System" },
+    info: {
+      Title: `Salary Slip – ${payroll._id}`,
+      Author: "Payroll System",
+    },
   });
 
-  doc.registerFont("DV",   FONT_REG);
-  doc.registerFont("DV-B", FONT_BOLD);
-
   res.setHeader("Content-Type", "application/pdf");
-  res.setHeader("Content-Disposition", `attachment; filename="salary_slip_${payroll._id}.pdf"`);
+  res.setHeader(
+    "Content-Disposition",
+    `attachment; filename="salary_slip_${payroll._id}.pdf"`
+  );
   doc.pipe(res);
 
-  const PW = doc.page.width;
-  const PH = doc.page.height;
-  const ML = 32;
-  const MW = PW - 2 * ML;
+  const PW = doc.page.width;   // 595.28
+  const PH = doc.page.height;  // 841.89
+  const ML = 28;               // left/right margin
+  const MW = PW - 2 * ML;     // usable width
 
-  // ── Primitives ──────────────────────────────────────────────────────────────
-  const box = (x, y, w, h, fill, stroke) =>
-    doc.rect(x, y, w, h).fillAndStroke(fill, stroke || fill);
-
-  const txt = (text, x, y, { size = 8, bold = false, color = C.slate, align = "left", width = null } = {}) => {
-    doc.fillColor(color).font(bold ? "DV-B" : "DV").fontSize(size);
-    const opts = { lineBreak: false, ...(width ? { width } : {}), ...(align !== "left" ? { align } : {}) };
-    doc.text(String(text), x, y, opts);
+  // ── Drawing primitives ──────────────────────────────────────────────────────
+  const fillRect = (x, y, w, h, fill, stroke) => {
+    doc.rect(x, y, w, h).fillAndStroke(fill || C.white, stroke || fill || C.white);
   };
 
-  const hline = (x1, y, x2, color, w = 0.5) =>
-    doc.moveTo(x1, y).lineTo(x2, y).strokeColor(color).lineWidth(w).stroke();
+  const txt = (text, x, y, opts = {}) => {
+    doc
+      .fillColor(opts.color || C.slate)
+      .font(opts.bold ? "Helvetica-Bold" : "Helvetica")
+      .fontSize(opts.size || 8)
+      .text(String(text), x, y, { lineBreak: false, ...opts.textOpts });
+  };
 
-  const vline = (x, y1, y2, color, w = 0.5) =>
-    doc.moveTo(x, y1).lineTo(x, y2).strokeColor(color).lineWidth(w).stroke();
+  // ── 1. HEADER ───────────────────────────────────────────────────────────────
+  // Navy background
+  fillRect(0, 0, PW, 95, C.navy);
 
-  let curY = 0;
+  // Gold top accent stripe
+  fillRect(0, 0, PW, 4, C.gold);
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // 1. HEADER
-  // ═══════════════════════════════════════════════════════════════════════════
-  const hdrH = 90;
-  box(0, 0, PW, hdrH, C.navy);
-  box(0, 0, PW, 3, C.gold);                        // gold top stripe
-  doc.polygon([PW-180,0],[PW,0],[PW,hdrH],[PW-220,hdrH]).fill(C.navy2); // diagonal accent
-  box(ML, 10, 3, hdrH - 20, C.gold);              // left accent bar
+  // Gold left vertical bar
+  fillRect(ML, 10, 4, 75, C.gold);
 
-  txt(payroll.project?.projectName || "Company Name", ML+12, 22, { size:18, bold:true, color:C.white });
-  txt(payroll.project?.siteName || "", ML+12, 46, { size:8.5, color:C.muted });
-  txt("SALARY SLIP", ML, 24, { size:16, bold:true, color:C.gold, align:"right", width:MW });
-  txt("CONFIDENTIAL  ·  FOR RECIPIENT ONLY", ML, 46, { size:7, color:C.muted, align:"right", width:MW });
-
-  // Pay period banner
-  box(0, hdrH, PW, 18, C.gold);
+  // Company / Project name
   txt(
-    `PAY PERIOD:   ${fmtDate(payroll.periodStart)}   –   ${fmtDate(payroll.periodEnd)}`,
-    ML, hdrH + 5, { size:8, bold:true, color:C.navy, align:"center", width:MW }
+    payroll.project?.projectName || "Company Name",
+    ML + 14, 20,
+    { color: C.white, bold: true, size: 20 }
+  );
+  txt(
+    payroll.project?.siteName || "Site / Branch",
+    ML + 14, 46,
+    { color: C.mutedBlue, size: 9 }
   );
 
-  curY = hdrH + 30;
+  // SALARY SLIP label (right aligned)
+  doc
+    .fillColor(C.gold)
+    .font("Helvetica-Bold")
+    .fontSize(15)
+    .text("SALARY SLIP", ML, 22, { width: MW, align: "right", lineBreak: false });
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // 2. EMPLOYEE + PAYMENT CARDS
-  // ═══════════════════════════════════════════════════════════════════════════
-  const cardH = 118;
-  const colW  = (MW - 10) / 2;
-  const rightX = ML + colW + 10;
+  doc
+    .fillColor(C.mutedBlue)
+    .font("Helvetica")
+    .fontSize(8)
+    .text("CONFIDENTIAL – FOR RECIPIENT ONLY", ML, 44, {
+      width: MW,
+      align: "right",
+      lineBreak: false,
+    });
+
+  // Pay period banner
+  fillRect(0, 95, PW, 17, C.gold);
+  doc
+    .fillColor(C.navy)
+    .font("Helvetica-Bold")
+    .fontSize(8)
+    .text(
+      `PAY PERIOD:  ${fmtDate(payroll.periodStart)}  –  ${fmtDate(payroll.periodEnd)}`,
+      ML, 100,
+      { width: MW, align: "center", lineBreak: false }
+    );
+
+  let curY = 126;
+
+  // ── 2. EMPLOYEE + PAYMENT CARDS ─────────────────────────────────────────────
+  const cardH = 120;
+  const colW  = (MW - 12) / 2;
+  const rightX = ML + colW + 12;
 
   const drawCard = (cx, cy, cw, ch, title) => {
-    box(cx+2, cy+2, cw, ch, C.shadow);
+    // Shadow
+    fillRect(cx + 2, cy + 2, cw, ch, "#D0D8E0");
+    // Card
     doc.rect(cx, cy, cw, ch).fillAndStroke(C.white, C.border);
-    box(cx, cy, cw, 24, C.navy);
-    box(cx, cy, 3, 24, C.gold);
-    txt(title, cx+10, cy+8, { size:8.5, bold:true, color:C.white });
+    // Title bar
+    fillRect(cx, cy, cw, 22, C.teal);
+    // Gold accent stripe
+    fillRect(cx, cy, 3, 22, C.gold);
+    txt(title, cx + 10, cy + 7, { color: C.white, bold: true, size: 9 });
   };
 
   drawCard(ML, curY, colW, cardH, "EMPLOYEE DETAILS");
@@ -120,40 +155,41 @@ export function generateSalarySlipPDF(payroll, res) {
     ["Phone",     String(user.phoneNumber || "—")],
     ["Aadhaar",   user.adharNumber || "—"],
   ].forEach(([lbl, val], i) => {
-    const ry = curY + 34 + i * 17;
-    txt(lbl + ":", ML+10, ry, { size:7.5, color:C.slateL });
-    txt(val,       ML+72, ry, { size:7.5, bold:true, color:C.navy });
+    const ry = curY + 30 + i * 18;
+    txt(lbl + ":", ML + 8, ry, { color: C.slate, size: 7.5 });
+    txt(val, ML + 70, ry, { color: C.navy, bold: true, size: 7.5 });
   });
 
-  const statusColors = { paid: C.green, partially_paid: "#9A6F00", pending: C.red };
-  const sc = statusColors[payroll.paymentStatus] || C.red;
+  const statusColors = {
+    paid:            C.green,
+    partially_paid:  "#B8860B",
+    pending:         C.red,
+  };
+  const statusColor = statusColors[payroll.paymentStatus] || C.red;
 
   [
     ["Payroll ID", String(payroll._id).slice(-8).toUpperCase(), null],
-    ["Status",     (payroll.paymentStatus || "pending").replace(/_/g, " ").toUpperCase(), sc],
+    ["Status",     (payroll.paymentStatus || "pending").replace(/_/g, " ").toUpperCase(), statusColor],
     ["Pay Date",   fmtDate(payroll.paymentDate), null],
     ["Mode",       (payroll.paymentMode || "—").replace(/_/g, " ").toUpperCase(), null],
     ["Txn Ref",    payroll.transactionReference || "—", null],
   ].forEach(([lbl, val, col], i) => {
-    const ry = curY + 34 + i * 17;
-    txt(lbl + ":", rightX+10, ry, { size:7.5, color:C.slateL });
-    txt(val,       rightX+72, ry, { size:7.5, bold:true, color: col || C.navy });
+    const ry = curY + 30 + i * 18;
+    txt(lbl + ":", rightX + 8, ry, { color: C.slate, size: 7.5 });
+    txt(val, rightX + 70, ry, { color: col || C.navy, bold: true, size: 7.5 });
   });
 
   curY += cardH + 16;
 
-  // ── Section header helper ───────────────────────────────────────────────────
-  const secHdr = (title, bg) => {
-    box(ML, curY, MW, 22, bg);
-    box(ML, curY, 3, 22, C.gold);
-    txt(title, ML+12, curY+7, { size:9, bold:true, color:C.white });
+  // ── 3. ATTENDANCE SUMMARY ───────────────────────────────────────────────────
+  const sectionHeader = (title, bg) => {
+    fillRect(ML, curY, MW, 22, bg);
+    fillRect(ML, curY, 4, 22, C.gold);
+    txt(title, ML + 12, curY + 7, { color: C.white, bold: true, size: 9.5 });
     curY += 22;
   };
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // 3. ATTENDANCE
-  // ═══════════════════════════════════════════════════════════════════════════
-  secHdr("ATTENDANCE SUMMARY", C.navy);
+  sectionHeader("ATTENDANCE SUMMARY", C.navy);
 
   const attItems = [
     ["Total Working Days", payroll.totalWorkingDays || 0],
@@ -161,151 +197,226 @@ export function generateSalarySlipPDF(payroll, res) {
     ["Days Absent",        payroll.absentDays || 0],
     ["Overtime Hours",     payroll.overtimeHours || 0],
   ];
-  const attH  = 54;
+  const attH  = 56;
   const attCW = MW / attItems.length;
 
   doc.rect(ML, curY, MW, attH).fillAndStroke(C.smoke, C.border);
+
   attItems.forEach(([lbl, val], i) => {
     const ax = ML + i * attCW;
-    if (i > 0) vline(ax, curY, curY + attH, C.border);
-    txt(String(val), ax, curY+10, { size:22, bold:true, color:C.teal, align:"center", width:attCW });
-    txt(lbl,         ax, curY+40, { size:6.5, color:C.slateL, align:"center", width:attCW });
+    if (i > 0) {
+      doc.moveTo(ax, curY).lineTo(ax, curY + attH).stroke(C.divider);
+    }
+    doc
+      .fillColor(C.teal)
+      .font("Helvetica-Bold")
+      .fontSize(24)
+      .text(String(val), ax, curY + 10, {
+        width: attCW,
+        align: "center",
+        lineBreak: false,
+      });
+    doc
+      .fillColor(C.slate)
+      .font("Helvetica")
+      .fontSize(7)
+      .text(lbl, ax, curY + 40, {
+        width: attCW,
+        align: "center",
+        lineBreak: false,
+      });
   });
+
   curY += attH + 14;
 
-  // ── Table helpers ───────────────────────────────────────────────────────────
-  const tblHdr = () => {
-    doc.rect(ML, curY, MW, 17).fillAndStroke(C.tealLt, C.border);
-    txt("DESCRIPTION", ML+10, curY+5, { size:7.5, bold:true, color:C.teal });
-    txt("AMOUNT", ML+10, curY+5, { size:7.5, bold:true, color:C.teal, align:"right", width:MW-20 });
-    curY += 17;
-  };
-
-  const tblRow = (desc, amt, idx, alt) => {
-    const bg = idx % 2 === 0 ? C.white : alt;
-    doc.rect(ML, curY, MW, 18).fillAndStroke(bg, C.border);
-    txt(desc,     ML+10, curY+5, { size:8, color:C.slate });
-    txt(fmt(amt), ML+10, curY+5, { size:8, bold:true, color:C.navy, align:"right", width:MW-20 });
+  // ── 4. TABLE HELPERS ────────────────────────────────────────────────────────
+  const drawTableHeader = (altBg) => {
+    doc.rect(ML, curY, MW, 18).fillAndStroke(altBg, C.border);
+    doc.fillColor(C.teal).font("Helvetica-Bold").fontSize(8)
+      .text("DESCRIPTION", ML + 10, curY + 5, { lineBreak: false });
+    doc.fillColor(C.teal).font("Helvetica-Bold").fontSize(8)
+      .text("AMOUNT", ML + MW - 100, curY + 5, {
+        width: 90,
+        align: "right",
+        lineBreak: false,
+      });
     curY += 18;
   };
 
-  const tblTotal = (lbl, val, bg, fg) => {
+  const drawTableRow = (desc, amt, idx, altColor) => {
+    const bg = idx % 2 === 0 ? C.white : altColor;
+    doc.rect(ML, curY, MW, 18).fillAndStroke(bg, C.border);
+    doc.fillColor(C.slate).font("Helvetica").fontSize(8.5)
+      .text(desc, ML + 10, curY + 5, { lineBreak: false });
+    doc.fillColor(C.navy).font("Helvetica-Bold").fontSize(8.5)
+      .text(fmt(amt), ML + MW - 100, curY + 5, {
+        width: 90,
+        align: "right",
+        lineBreak: false,
+      });
+    curY += 18;
+  };
+
+  const drawTotalRow = (lbl, val, bg, fg) => {
     doc.rect(ML, curY, MW, 22).fillAndStroke(bg, C.border);
-    box(ML, curY, 3, 22, C.gold);
-    txt(lbl,      ML+10, curY+6, { size:9.5, bold:true, color:fg });
-    txt(fmt(val), ML+10, curY+6, { size:9.5, bold:true, color:fg, align:"right", width:MW-20 });
+    fillRect(ML, curY, 4, 22, C.gold);
+    doc.fillColor(fg).font("Helvetica-Bold").fontSize(10)
+      .text(lbl, ML + 12, curY + 6, { lineBreak: false });
+    doc.fillColor(fg).font("Helvetica-Bold").fontSize(10)
+      .text(fmt(val), ML + MW - 100, curY + 6, {
+        width: 90,
+        align: "right",
+        lineBreak: false,
+      });
     curY += 34;
   };
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // 4. EARNINGS
-  // ═══════════════════════════════════════════════════════════════════════════
-  secHdr("EARNINGS", C.green);
-  tblHdr();
+  // ── 5. EARNINGS ─────────────────────────────────────────────────────────────
+  sectionHeader("EARNINGS", C.green);
+  drawTableHeader(C.tealLt);
 
   const earningRows = [
     ["Basic Salary", payroll.basicSalary],
     ["Overtime Pay",  payroll.overtimePay],
     ...(payroll.allowances || []).map((a) => [
-      `Allowance – ${(a.reason||"").replace(/_/g," ")}${a.note ? `  (${a.note})` : ""}`,
+      `Allowance – ${(a.reason || "").replace(/_/g, " ")}${a.note ? ` (${a.note})` : ""}`,
       a.amount,
     ]),
   ];
-  earningRows.forEach(([d, a], i) => tblRow(d, a, i, C.greenLt));
-  tblTotal("GROSS SALARY", payroll.grossSalary, C.greenBar, C.green);
+  earningRows.forEach(([d, a], i) => drawTableRow(d, a, i, C.greenLt));
+  drawTotalRow("GROSS SALARY", payroll.grossSalary, C.greenBar, C.green);
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // 5. DEDUCTIONS
-  // ═══════════════════════════════════════════════════════════════════════════
-  secHdr("DEDUCTIONS", C.red);
-  tblHdr();
+  // ── 6. DEDUCTIONS ───────────────────────────────────────────────────────────
+  sectionHeader("DEDUCTIONS", C.red);
+  drawTableHeader(C.tealLt);
 
   const deductionRows = [
     ...(payroll.deductions || []).map((d) => [
-      `Deduction – ${(d.reason||"").replace(/_/g," ")}${d.note ? `  (${d.note})` : ""}`,
+      `Deduction – ${(d.reason || "").replace(/_/g, " ")}${d.note ? ` (${d.note})` : ""}`,
       d.amount,
     ]),
-    ...(payroll.advanceRecovered > 0 ? [["Advance Recovery", payroll.advanceRecovered]] : []),
+    ...(payroll.advanceRecovered > 0
+      ? [["Advance Recovery", payroll.advanceRecovered]]
+      : []),
   ];
 
-  if (!deductionRows.length) {
+  if (deductionRows.length === 0) {
     doc.rect(ML, curY, MW, 18).fillAndStroke(C.white, C.border);
-    txt("No deductions for this period", ML+10, curY+5, { size:8, color:C.slateL });
+    txt("No deductions for this period", ML + 10, curY + 5, { color: C.slate });
     curY += 18;
   } else {
-    deductionRows.forEach(([d, a], i) => tblRow(d, a, i, C.redLt));
+    deductionRows.forEach(([d, a], i) => drawTableRow(d, a, i, C.redLt));
   }
-  tblTotal("TOTAL DEDUCTIONS", payroll.totalDeductions, C.redBar, C.red);
+  drawTotalRow("TOTAL DEDUCTIONS", payroll.totalDeductions, C.redBar, C.red);
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // 6. ADVANCE PANEL
-  // ═══════════════════════════════════════════════════════════════════════════
+  // ── 7. ADVANCE PANEL ────────────────────────────────────────────────────────
   if (payroll.advancePaid > 0) {
-    const advH = 48;
-    doc.rect(ML, curY, MW, advH).fillAndStroke(C.goldLt, C.goldMid);
-    box(ML, curY, 3, advH, C.gold);
-    const outstanding = (payroll.advancePaid||0) - (payroll.advanceRecovered||0);
-    txt("ADVANCE INFORMATION",                    ML+10,       curY+8,  { size:8.5, bold:true, color:C.navy });
-    txt(`Total Advance:   ${fmt(payroll.advancePaid)}`,   ML+10,       curY+24, { size:8, color:C.slate });
-    txt(`Recovered:   ${fmt(payroll.advanceRecovered||0)}`, ML+MW/2,   curY+24, { size:8, color:C.slate });
-    txt(`Outstanding Balance:   ${fmt(outstanding)}`,     ML+10,       curY+38, { size:8, bold:true, color:C.red });
+    const advH = 50;
+    doc.rect(ML, curY, MW, advH).fillAndStroke(C.goldLt, C.gold);
+    txt("ADVANCE INFORMATION", ML + 10, curY + 8, {
+      color: C.navy,
+      bold: true,
+      size: 9,
+    });
+    const outstanding = (payroll.advancePaid || 0) - (payroll.advanceRecovered || 0);
+    txt(`Total Advance Given:  ${fmt(payroll.advancePaid)}`, ML + 10, curY + 26, {
+      color: C.slate,
+      size: 8.5,
+    });
+    txt(`Recovered This Period:  ${fmt(payroll.advanceRecovered)}`, ML + MW / 2, curY + 26, {
+      color: C.slate,
+      size: 8.5,
+    });
+    txt(`Outstanding Balance:  ${fmt(outstanding)}`, ML + 10, curY + 40, {
+      color: C.slate,
+      size: 8.5,
+    });
     curY += advH + 12;
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // 7. NET SALARY
-  // ═══════════════════════════════════════════════════════════════════════════
-  const netH = 64;
-  box(ML+3, curY+3, MW, netH, C.shadow);     // shadow
-  box(ML, curY, MW, netH, C.navy);
-  box(ML, curY, MW, 2, C.gold);              // gold top line
-  box(ML, curY+netH-2, MW, 2, C.gold);      // gold bottom line
+  // ── 8. NET SALARY BOX ───────────────────────────────────────────────────────
+  const netH = 68;
+  fillRect(ML, curY, MW, netH, C.navy);
+  fillRect(ML, curY, MW, 3, C.gold);
+  fillRect(ML, curY + netH - 3, MW, 3, C.gold);
 
-  txt("NET SALARY PAYABLE", ML, curY+14, { size:9, color:C.muted, align:"center", width:MW });
-  txt(fmt(payroll.netSalary), ML, curY+30, { size:28, bold:true, color:C.gold, align:"center", width:MW });
+  doc
+    .fillColor(C.mutedBlue)
+    .font("Helvetica")
+    .fontSize(9)
+    .text("NET SALARY PAYABLE", ML, curY + 12, {
+      width: MW,
+      align: "center",
+      lineBreak: false,
+    });
+  doc
+    .fillColor(C.gold)
+    .font("Helvetica-Bold")
+    .fontSize(30)
+    .text(fmt(payroll.netSalary), ML, curY + 28, {
+      width: MW,
+      align: "center",
+      lineBreak: false,
+    });
+
   curY += netH + 14;
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // 8. REMARKS
-  // ═══════════════════════════════════════════════════════════════════════════
+  // ── 9. REMARKS ──────────────────────────────────────────────────────────────
   if (payroll.remarks) {
-    const remH = 34;
+    const remH = 36;
     doc.rect(ML, curY, MW, remH).fillAndStroke(C.smoke, C.border);
-    box(ML, curY, 3, remH, C.teal);
-    txt("REMARKS:", ML+10, curY+12, { size:8, bold:true, color:C.teal });
-    txt(payroll.remarks, ML+80, curY+12, { size:8, color:C.slate });
+    txt("REMARKS:", ML + 10, curY + 10, { color: C.teal, bold: true, size: 8.5 });
+    txt(payroll.remarks, ML + 80, curY + 10, {
+      color: C.slate,
+      size: 8.5,
+      textOpts: { width: MW - 95, lineBreak: false },
+    });
     curY += remH + 12;
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // 9. SIGNATURE LINES
-  // ═══════════════════════════════════════════════════════════════════════════
-  if (curY < PH - 110) {
-    curY += 8;
-    const sigW = (MW - 48) / 3;
+  // ── 10. SIGNATURE LINES ─────────────────────────────────────────────────────
+  if (curY < PH - 130) {
+    curY += 10;
+    const sigW = (MW - 40) / 3;
     ["Prepared By", "Verified By", "Authorised By"].forEach((lbl, i) => {
-      const sx = ML + i * (sigW + 24);
-      hline(sx, curY+36, sx+sigW, C.navy, 0.8);
-      doc.circle(sx+sigW/2, curY+22, 12).stroke(C.border);
-      txt(lbl, sx, curY+46, { size:7, color:C.slateL, align:"center", width:sigW });
+      const sx = ML + i * (sigW + 20);
+      doc
+        .moveTo(sx, curY + 36)
+        .lineTo(sx + sigW, curY + 36)
+        .strokeColor(C.navy)
+        .lineWidth(0.8)
+        .stroke();
+      doc
+        .fillColor(C.slate)
+        .font("Helvetica")
+        .fontSize(7.5)
+        .text(lbl, sx, curY + 44, {
+          width: sigW,
+          align: "center",
+          lineBreak: false,
+        });
     });
-    curY += 58;
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // 10. FOOTER
-  // ═══════════════════════════════════════════════════════════════════════════
-  const footH = 38;
-  box(0, PH-footH, PW, footH, C.footer);
-  hline(0, PH-footH, PW, C.gold, 1.5);
-  txt(
-    "This is a computer-generated document and does not require a physical signature.",
-    ML, PH-footH+8, { size:6.5, color:C.slateL, align:"center", width:MW }
-  );
-  txt(
-    `Generated: ${new Date().toLocaleString("en-IN")}   ·   Payroll ID: ${payroll._id}`,
-    ML, PH-footH+22, { size:6.5, color:C.slateL, align:"center", width:MW }
-  );
+  // ── 11. FOOTER ──────────────────────────────────────────────────────────────
+  const footerH = 40;
+  fillRect(0, PH - footerH, PW, footerH, C.footer);
+  fillRect(0, PH - footerH, PW, 1, C.gold);
+
+  doc
+    .fillColor(C.slate)
+    .font("Helvetica")
+    .fontSize(6.5)
+    .text(
+      "This is a computer-generated salary slip and does not require a physical signature.",
+      ML, PH - footerH + 10,
+      { width: MW, align: "center", lineBreak: false }
+    )
+    .text(
+      `Generated: ${new Date().toLocaleString("en-IN")}   |   Payroll ID: ${payroll._id}`,
+      ML, PH - footerH + 24,
+      { width: MW, align: "center", lineBreak: false }
+    );
 
   doc.end();
 }
