@@ -9,11 +9,16 @@ export const submitAttendance = async (req, res) => {
   try {
     console.log("📝 [ATTENDANCE] Starting attendance submission...");
     console.log("📦 Request body:", JSON.stringify(req.body, null, 2));
-    console.log("👤 User:", req.user ? {
-      id: req.user._id,
-      role: req.user.role,
-      name: req.user.name
-    } : "No user found");
+    console.log(
+      "👤 User:",
+      req.user
+        ? {
+            id: req.user._id,
+            role: req.user.role,
+            name: req.user.name,
+          }
+        : "No user found",
+    );
 
     const { projectId, attendanceType, selfieImage, coordinates } = req.body;
 
@@ -25,7 +30,9 @@ export const submitAttendance = async (req, res) => {
 
     console.log("🔐 [ATTENDANCE] Checking user role...");
     if (req.user.role !== "labour") {
-      console.log(`❌ [ATTENDANCE] Invalid role: ${req.user.role}. Expected: labour`);
+      console.log(
+        `❌ [ATTENDANCE] Invalid role: ${req.user.role}. Expected: labour`,
+      );
       return res.status(403).json({
         success: false,
         message: "Only labour can mark attendance",
@@ -46,7 +53,7 @@ export const submitAttendance = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "All fields are required",
-        missingFields
+        missingFields,
       });
     }
     console.log("✅ [ATTENDANCE] All required fields present");
@@ -54,19 +61,24 @@ export const submitAttendance = async (req, res) => {
     // 📍 Validate coordinates
     console.log("📍 [ATTENDANCE] Validating coordinates:", coordinates);
     if (!Array.isArray(coordinates) || coordinates.length !== 2) {
-      console.log("❌ [ATTENDANCE] Invalid coordinates format. Expected [longitude, latitude], got:", coordinates);
+      console.log(
+        "❌ [ATTENDANCE] Invalid coordinates format. Expected [longitude, latitude], got:",
+        coordinates,
+      );
       return res.status(400).json({
         success: false,
         message: "Coordinates must be [longitude, latitude]",
       });
     }
     console.log("✅ [ATTENDANCE] Coordinates format valid");
-    console.log(`📍 User location - Longitude: ${coordinates[0]}, Latitude: ${coordinates[1]}`);
+    console.log(
+      `📍 User location - Longitude: ${coordinates[0]}, Latitude: ${coordinates[1]}`,
+    );
 
     // 🔍 Find Project
     console.log(`🔍 [ATTENDANCE] Looking for project with ID: ${projectId}`);
     const project = await Project.findById(projectId);
-    
+
     if (!project) {
       console.log("❌ [ATTENDANCE] Project not found with ID:", projectId);
       return res.status(400).json({
@@ -77,13 +89,16 @@ export const submitAttendance = async (req, res) => {
     console.log("✅ [ATTENDANCE] Project found:", {
       id: project._id,
       name: project.projectName,
-      siteName: project.siteName
+      siteName: project.siteName,
     });
 
     // Check project location
     console.log("📍 [ATTENDANCE] Checking project location configuration...");
     if (!project.location?.coordinates?.coordinates) {
-      console.log("❌ [ATTENDANCE] Project location not configured. Location data:", project.location);
+      console.log(
+        "❌ [ATTENDANCE] Project location not configured. Location data:",
+        project.location,
+      );
       return res.status(400).json({
         success: false,
         message: "Project location not configured",
@@ -97,11 +112,11 @@ export const submitAttendance = async (req, res) => {
 
     console.log("📍 [ATTENDANCE] Project coordinates:", {
       longitude: projectLng,
-      latitude: projectLat
+      latitude: projectLat,
     });
     console.log("📍 [ATTENDANCE] User coordinates:", {
       longitude: userLng,
-      latitude: userLat
+      latitude: userLat,
     });
 
     console.log("📏 [ATTENDANCE] Calculating distance...");
@@ -112,53 +127,74 @@ export const submitAttendance = async (req, res) => {
       userLng,
     );
 
-    console.log(`📏 [ATTENDANCE] Calculated distance: ${distance.toFixed(2)} meters`);
+    console.log(
+      `📏 [ATTENDANCE] Calculated distance: ${distance.toFixed(2)} meters`,
+    );
 
     if (distance > 10) {
-      console.log(`❌ [ATTENDANCE] Distance exceeded limit: ${distance.toFixed(2)}m > 10m`);
-      
+      console.log(
+        `❌ [ATTENDANCE] Distance exceeded limit: ${distance.toFixed(2)}m > 10m`,
+      );
+
       // Create a user-friendly message with the distance
       const distanceMessage = `You are not on site. You are ${distance.toFixed(2)} meters away from the project location. Maximum allowed distance is 10 meters.`;
-      
+
       return res.status(403).json({
         success: false,
         message: distanceMessage,
         data: {
           distance: distance.toFixed(2),
           maxAllowed: 10,
-          isWithinRange: false
-        }
+          isWithinRange: false,
+        },
       });
     }
     console.log("✅ [ATTENDANCE] Distance within limit (≤ 10m)");
 
     // 🔍 Find attendance document
-    console.log(`🔍 [ATTENDANCE] Looking for attendance document - User: ${req.user._id}, Project: ${projectId}`);
+    console.log(
+      `🔍 [ATTENDANCE] Looking for attendance document - User: ${req.user._id}, Project: ${projectId}`,
+    );
     let attendanceDoc = await Attendance.findOne({
       user: req.user._id,
       project: projectId,
     });
 
     if (!attendanceDoc) {
-      console.log("🆕 [ATTENDANCE] No existing attendance found. Creating new document...");
+      console.log(
+        "🆕 [ATTENDANCE] No existing attendance found. Creating new document...",
+      );
       attendanceDoc = await Attendance.create({
         user: req.user._id,
         project: projectId,
         history: [],
       });
-      console.log("✅ [ATTENDANCE] New attendance document created with ID:", attendanceDoc._id);
+      console.log(
+        "✅ [ATTENDANCE] New attendance document created with ID:",
+        attendanceDoc._id,
+      );
     } else {
-      console.log("✅ [ATTENDANCE] Existing attendance document found. ID:", attendanceDoc._id);
-      console.log(`📊 [ATTENDANCE] Current history entries: ${attendanceDoc.history.length}`);
+      console.log(
+        "✅ [ATTENDANCE] Existing attendance document found. ID:",
+        attendanceDoc._id,
+      );
+      console.log(
+        `📊 [ATTENDANCE] Current history entries: ${attendanceDoc.history.length}`,
+      );
     }
 
     // 🔎 Check last history entry
     const lastEntry = attendanceDoc.history[attendanceDoc.history.length - 1];
-    console.log("📜 [ATTENDANCE] Last history entry:", lastEntry ? {
-      type: lastEntry.attendanceType,
-      time: lastEntry.timestamp,
-      location: lastEntry.location?.coordinates
-    } : "No previous entries");
+    console.log(
+      "📜 [ATTENDANCE] Last history entry:",
+      lastEntry
+        ? {
+            type: lastEntry.attendanceType,
+            time: lastEntry.timestamp,
+            location: lastEntry.location?.coordinates,
+          }
+        : "No previous entries",
+    );
 
     // 🚫 Validation rules
     console.log("🚫 [ATTENDANCE] Validating attendance rules...");
@@ -179,7 +215,9 @@ export const submitAttendance = async (req, res) => {
       attendanceType === "check-out" &&
       (!lastEntry || lastEntry.attendanceType !== "check-in")
     ) {
-      console.log("❌ [ATTENDANCE] Invalid: Cannot check out without checking in first");
+      console.log(
+        "❌ [ATTENDANCE] Invalid: Cannot check out without checking in first",
+      );
       return res.status(400).json({
         success: false,
         message: "You must check in before checking out.",
@@ -201,14 +239,16 @@ export const submitAttendance = async (req, res) => {
 
     console.log("📝 [ATTENDANCE] New entry:", {
       ...newEntry,
-      selfieImage: "[BASE64_IMAGE_TRUNCATED]"
+      selfieImage: "[BASE64_IMAGE_TRUNCATED]",
     });
 
     attendanceDoc.history.push(newEntry);
     await attendanceDoc.save();
 
     console.log("✅ [ATTENDANCE] Attendance saved successfully!");
-    console.log(`📊 [ATTENDANCE] Total history entries now: ${attendanceDoc.history.length}`);
+    console.log(
+      `📊 [ATTENDANCE] Total history entries now: ${attendanceDoc.history.length}`,
+    );
     console.log(`🕒 [ATTENDANCE] Timestamp: ${new Date().toISOString()}`);
 
     return res.status(201).json({
@@ -217,26 +257,24 @@ export const submitAttendance = async (req, res) => {
       data: {
         history: attendanceDoc.history,
         distance: distance.toFixed(2),
-        isWithinRange: true
-      }
+        isWithinRange: true,
+      },
     });
-
   } catch (error) {
     console.error("🔥 [ATTENDANCE] Error:", error);
     console.error("📋 [ATTENDANCE] Error details:", {
       name: error.name,
       message: error.message,
       stack: error.stack,
-      code: error.code
+      code: error.code,
     });
-    
+
     return res.status(500).json({
       success: false,
       message: error.message || "An error occurred while submitting attendance",
     });
   }
 };
-
 
 export const getMyAttendance = async (req, res) => {
   try {
@@ -247,38 +285,40 @@ export const getMyAttendance = async (req, res) => {
     }).populate("project", "projectName siteName");
 
     // Get all projects you're associated with
-    const myProjectIds = myAttendanceRecords.map(record => record.project._id.toString());
-    
+    const myProjectIds = myAttendanceRecords.map((record) =>
+      record.project._id.toString(),
+    );
+
     // Get ALL attendance records from your projects (all users)
     const allAttendanceRecords = await Attendance.find({
-      project: { $in: myProjectIds }
+      project: { $in: myProjectIds },
     }).populate("project", "projectName siteName");
 
     const activeDatesSet = new Set();
-    
-    allAttendanceRecords.forEach(record => {
-      record.history.forEach(entry => {
+
+    allAttendanceRecords.forEach((record) => {
+      record.history.forEach((entry) => {
         const entryDate = new Date(entry.createdAt);
-        const dateStr = entryDate.toISOString().split('T')[0];
+        const dateStr = entryDate.toISOString().split("T")[0];
         activeDatesSet.add(dateStr);
       });
     });
 
     // Convert to sorted array
     const activeDates = Array.from(activeDatesSet).sort();
-    
+
     /* ===============================
        CREATE A MAP OF YOUR ATTENDANCE BY DATE
     =============================== */
     const myAttendanceByDate = {};
-    
+
     // Process your attendance records
-    myAttendanceRecords.forEach(record => {
+    myAttendanceRecords.forEach((record) => {
       // Group by date
-      record.history.forEach(entry => {
+      record.history.forEach((entry) => {
         const entryDate = new Date(entry.createdAt);
-        const dateStr = entryDate.toISOString().split('T')[0];
-        
+        const dateStr = entryDate.toISOString().split("T")[0];
+
         // Only process if this date is in active dates
         if (activeDatesSet.has(dateStr)) {
           if (!myAttendanceByDate[dateStr]) {
@@ -290,7 +330,7 @@ export const getMyAttendance = async (req, res) => {
               history: [],
               createdAt: record.createdAt,
               updatedAt: record.updatedAt,
-              __v: record.__v
+              __v: record.__v,
             };
           }
           myAttendanceByDate[dateStr].history.push(entry);
@@ -304,27 +344,33 @@ export const getMyAttendance = async (req, res) => {
     const finalAttendance = {};
 
     // For each active date, add your attendance data or mark as absent
-    activeDates.forEach(dateStr => {
+    activeDates.forEach((dateStr) => {
       if (myAttendanceByDate[dateStr]) {
         // You were present on this date
         const record = myAttendanceByDate[dateStr];
-        
+
         // Sort history
-        record.history.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-        
+        record.history.sort(
+          (a, b) => new Date(a.createdAt) - new Date(b.createdAt),
+        );
+
         // Calculate working time
-        const { totalMinutes, totalHours } = calculateTotalWorkingTime(record.history);
+        const { totalMinutes, totalHours } = calculateTotalWorkingTime(
+          record.history,
+        );
         record.totalWorkingMinutes = totalMinutes;
         record.totalWorkingHours = totalHours;
-        
+
         finalAttendance[dateStr] = [record];
       } else {
         // You were absent on this date (but others were present)
-        finalAttendance[dateStr] = [{
-          status: "absent",
-          message: "Other users checked in on this date, but you were absent",
-          date: dateStr
-        }];
+        finalAttendance[dateStr] = [
+          {
+            status: "absent",
+            message: "Other users checked in on this date, but you were absent",
+            date: dateStr,
+          },
+        ];
       }
     });
 
@@ -332,7 +378,7 @@ export const getMyAttendance = async (req, res) => {
     const sortedFinalAttendance = {};
     Object.keys(finalAttendance)
       .sort((a, b) => new Date(b) - new Date(a))
-      .forEach(date => {
+      .forEach((date) => {
         sortedFinalAttendance[date] = finalAttendance[date];
       });
 
@@ -343,7 +389,7 @@ export const getMyAttendance = async (req, res) => {
     let presentDays = 0;
     let absentDays = 0;
 
-    Object.keys(sortedFinalAttendance).forEach(date => {
+    Object.keys(sortedFinalAttendance).forEach((date) => {
       const record = sortedFinalAttendance[date][0];
       if (record.status === "present") {
         presentDays++;
@@ -364,10 +410,9 @@ export const getMyAttendance = async (req, res) => {
         presentDays,
         absentDays,
         totalWorkingMinutes,
-        totalWorkingHours: Math.round((totalWorkingMinutes / 60) * 100) / 100
-      }
+        totalWorkingHours: Math.round((totalWorkingMinutes / 60) * 100) / 100,
+      },
     });
-
   } catch (error) {
     console.error("🔥 Get My Attendance Error:", error);
     return res.status(500).json({
@@ -688,7 +733,7 @@ export const getDailyWorkingHours = async (req, res) => {
 };
 export const getMonthlySummary = async (req, res) => {
   try {
-    const { month, year } = req.query; 
+    const { month, year } = req.query;
     const start = new Date(year, month - 1, 1);
     const end = new Date(year, month, 1);
 
@@ -1128,10 +1173,11 @@ export const getProjectAttendanceAdmin = async (req, res) => {
     const { projectId } = req.params;
     const { date, viewMode = "daily" } = req.query;
 
-    let startDate, endDate;
+    let startDate = null;
+    let endDate = null;
 
     // ----------------------------
-    // DATE FILTER RANGE
+    // DATE RANGE LOGIC
     // ----------------------------
     if (date) {
       const selectedDate = new Date(date);
@@ -1139,9 +1185,12 @@ export const getProjectAttendanceAdmin = async (req, res) => {
       if (viewMode === "daily") {
         startDate = new Date(selectedDate);
         startDate.setHours(0, 0, 0, 0);
+
         endDate = new Date(selectedDate);
         endDate.setHours(23, 59, 59, 999);
-      } else if (viewMode === "weekly") {
+      }
+
+      if (viewMode === "weekly") {
         const day = selectedDate.getDay();
         const diffToMonday = day === 0 ? -6 : 1 - day;
 
@@ -1152,13 +1201,16 @@ export const getProjectAttendanceAdmin = async (req, res) => {
         endDate = new Date(startDate);
         endDate.setDate(startDate.getDate() + 6);
         endDate.setHours(23, 59, 59, 999);
-      } else if (viewMode === "monthly") {
+      }
+
+      if (viewMode === "monthly") {
         startDate = new Date(
           selectedDate.getFullYear(),
           selectedDate.getMonth(),
           1,
         );
         startDate.setHours(0, 0, 0, 0);
+
         endDate = new Date(
           selectedDate.getFullYear(),
           selectedDate.getMonth() + 1,
@@ -1169,19 +1221,14 @@ export const getProjectAttendanceAdmin = async (req, res) => {
     }
 
     // ----------------------------
-    // QUERY FILTER (only for selecting records)
+    // ❗ FIX: ALWAYS FETCH FULL HISTORY
     // ----------------------------
-    const query = { project: projectId };
-    if (startDate && endDate) {
-      query["history.createdAt"] = { $gte: startDate, $lte: endDate };
-    }
-
-    const attendance = await Attendance.find(query)
+    const attendance = await Attendance.find({ project: projectId })
       .populate("user", "name phoneNumber")
       .sort({ createdAt: -1 });
 
     // ----------------------------
-    // GROUP BY USER & COLLECT FULL HISTORY
+    // GROUP BY USER
     // ----------------------------
     const projectAttendance = {};
 
@@ -1191,37 +1238,39 @@ export const getProjectAttendanceAdmin = async (req, res) => {
       if (!projectAttendance[userId]) {
         projectAttendance[userId] = {
           user: record.user,
-          attendance: [], // filtered docs list
-          fullHistory: [], // all-time history
+          attendance: [], // all attendance documents
+          fullHistory: [], // all history events
         };
       }
 
-      // Always add full history (never filter it)
+      // Add full history (all time)
       if (record.history) {
         record.history.forEach((h) =>
           projectAttendance[userId].fullHistory.push(h),
         );
       }
 
-      // Add full record to attendance list (not filtered!)
+      // Store full attendance record
       projectAttendance[userId].attendance.push({
         ...record.toObject(),
-        history: record.history, // ALL TIME
+        history: record.history, // unfiltered
       });
     });
 
     // ----------------------------
-    // COMPUTE SUMMARY + WORKING TIME
+    // COMPUTE WORKING TIME + SUMMARY
     // ----------------------------
     Object.keys(projectAttendance).forEach((userId) => {
       const userData = projectAttendance[userId];
 
-      // FULL history (for summary)
+      // Sort full history
       const fullHistory = [...userData.fullHistory].sort(
         (a, b) => new Date(a.createdAt) - new Date(b.createdAt),
       );
 
-      // FILTERED history (for workingTime only)
+      // ----------------------------
+      // FILTERED HISTORY FOR RANGE (FIX)
+      // ----------------------------
       const rangeHistory = fullHistory.filter((h) => {
         if (!startDate || !endDate) return true;
         const d = new Date(h.createdAt);
@@ -1229,7 +1278,7 @@ export const getProjectAttendanceAdmin = async (req, res) => {
       });
 
       // ----------------------------
-      // WORKING TIME (FILTERED)
+      // WORKING TIME (FILTERED RANGE)
       // ----------------------------
       let totalMinutes = 0;
       let lastCheckIn = null;
@@ -1241,14 +1290,16 @@ export const getProjectAttendanceAdmin = async (req, res) => {
           const diff =
             new Date(record.createdAt) - new Date(lastCheckIn.createdAt);
           const mins = Math.floor(diff / (1000 * 60));
+
           if (mins > 0 && mins < 960) totalMinutes += mins;
+
           lastCheckIn = null;
         }
       });
 
       userData.workingTime = {
         totalMinutes,
-        totalHours: parseFloat((totalMinutes / 60).toFixed(2)),
+        totalHours: Number((totalMinutes / 60).toFixed(2)),
         formatted: `${Math.floor(totalMinutes / 60)}h ${totalMinutes % 60}m`,
       };
 
@@ -1256,6 +1307,7 @@ export const getProjectAttendanceAdmin = async (req, res) => {
       // DAILY WORKING TIME (ALL TIME)
       // ----------------------------
       const historyPerDay = {};
+
       fullHistory.forEach((h) => {
         const d = new Date(h.createdAt).toISOString().split("T")[0];
         if (!historyPerDay[d]) historyPerDay[d] = [];
@@ -1263,12 +1315,14 @@ export const getProjectAttendanceAdmin = async (req, res) => {
       });
 
       const dailyWorkingTime = {};
+
       Object.keys(historyPerDay).forEach((d) => {
         const dayRecs = historyPerDay[d].sort(
           (a, b) => new Date(a.createdAt) - new Date(b.createdAt),
         );
-        let mins = 0,
-          dayIn = null;
+
+        let mins = 0;
+        let dayIn = null;
 
         dayRecs.forEach((r) => {
           if (r.attendanceType === "check-in") {
@@ -1283,13 +1337,13 @@ export const getProjectAttendanceAdmin = async (req, res) => {
 
         dailyWorkingTime[d] = {
           totalMinutes: mins,
-          totalHours: parseFloat((mins / 60).toFixed(2)),
+          totalHours: Number((mins / 60).toFixed(2)),
           formatted: `${Math.floor(mins / 60)}h ${mins % 60}m`,
         };
       });
 
       // ----------------------------
-      // PRESENT DAYS (ALL TIME)
+      // SUMMARY
       // ----------------------------
       const uniqueDates = Object.keys(historyPerDay);
 
@@ -1317,22 +1371,20 @@ export const getUserProjects = async (req, res) => {
         { client: userId },
         { site_manager: userId },
         { labour: userId },
-        { createdBy: userId } 
-      ]
-    })
-    .select('_id projectName siteName'); 
+        { createdBy: userId },
+      ],
+    }).select("_id projectName siteName");
     res.status(200).json({
       success: true,
       count: projects.length,
-      data: projects
+      data: projects,
     });
-
   } catch (error) {
     console.error("Error fetching user projects:", error);
     res.status(500).json({
       success: false,
       message: "Error fetching projects",
-      error: error.message
+      error: error.message,
     });
   }
 };
