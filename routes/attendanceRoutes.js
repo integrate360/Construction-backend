@@ -14,6 +14,7 @@ import {
   adminAddAttendanceForUser,
   deleteAttendanceRecord,
   getProjectAttendanceAdmin,
+  getUserProjects,
 } from "../controllers/attendanceController.js";
 
 const router = express.Router();
