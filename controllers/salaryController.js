@@ -56,10 +56,6 @@ export const getAllSalaryStructures = async (req, res) => {
       isActive,
       salaryType,
       search,
-      minRate,
-      maxRate,
-      effectiveFrom,
-      effectiveTo,
       sortBy = "createdAt",
       sortOrder = "desc",
     } = req.query;
@@ -75,17 +71,6 @@ export const getAllSalaryStructures = async (req, res) => {
     if (role) filter.role = role;
     if (salaryType) filter.salaryType = salaryType;
     if (isActive !== undefined) filter.isActive = isActive === "true";
-
-    // Rate range filter
-    if (minRate || maxRate) {
-      filter.rateAmount = {};
-      if (minRate) filter.rateAmount.$gte = Number(minRate);
-      if (maxRate) filter.rateAmount.$lte = Number(maxRate);
-    }
-
-    // Effective date range filter
-    if (effectiveFrom) filter.effectiveFrom = { $gte: new Date(effectiveFrom) };
-    if (effectiveTo) filter.effectiveTo = { $lte: new Date(effectiveTo) };
 
     // Sort
     const sortOptions = {};
@@ -514,14 +499,7 @@ export const getAllPayrolls = async (req, res) => {
       user,
       role,
       paymentStatus,
-      periodStart,
-      periodEnd,
       search,
-      paymentMode,
-      minNetSalary,
-      maxNetSalary,
-      minGrossSalary,
-      maxGrossSalary,
       sortBy = "createdAt",
       sortOrder = "desc",
     } = req.query;
@@ -536,21 +514,6 @@ export const getAllPayrolls = async (req, res) => {
     if (user) filter.user = user;
     if (role) filter.role = role;
     if (paymentStatus) filter.paymentStatus = paymentStatus;
-    if (paymentMode) filter.paymentMode = paymentMode;
-    if (periodStart) filter.periodStart = { $gte: new Date(periodStart) };
-    if (periodEnd) filter.periodEnd = { $lte: new Date(periodEnd) };
-
-    // Salary range filters
-    if (minNetSalary || maxNetSalary) {
-      filter.netSalary = {};
-      if (minNetSalary) filter.netSalary.$gte = Number(minNetSalary);
-      if (maxNetSalary) filter.netSalary.$lte = Number(maxNetSalary);
-    }
-    if (minGrossSalary || maxGrossSalary) {
-      filter.grossSalary = {};
-      if (minGrossSalary) filter.grossSalary.$gte = Number(minGrossSalary);
-      if (maxGrossSalary) filter.grossSalary.$lte = Number(maxGrossSalary);
-    }
 
     // Search by user name/email or project name
     if (search) {
@@ -944,10 +907,6 @@ export const getAllAdvances = async (req, res) => {
       user,
       recoveryStatus,
       search,
-      minAmount,
-      maxAmount,
-      givenDateFrom,
-      givenDateTo,
       sortBy = "givenDate",
       sortOrder = "desc",
     } = req.query;
@@ -961,20 +920,6 @@ export const getAllAdvances = async (req, res) => {
     if (project) filter.project = project;
     if (user) filter.user = user;
     if (recoveryStatus) filter.recoveryStatus = recoveryStatus;
-
-    // Amount range filter
-    if (minAmount || maxAmount) {
-      filter.amount = {};
-      if (minAmount) filter.amount.$gte = Number(minAmount);
-      if (maxAmount) filter.amount.$lte = Number(maxAmount);
-    }
-
-    // Date range filter
-    if (givenDateFrom || givenDateTo) {
-      filter.givenDate = {};
-      if (givenDateFrom) filter.givenDate.$gte = new Date(givenDateFrom);
-      if (givenDateTo) filter.givenDate.$lte = new Date(givenDateTo);
-    }
 
     // Search by user name/email or reason
     if (search) {
