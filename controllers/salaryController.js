@@ -84,7 +84,6 @@ export const getAllSalaryStructures = async (req, res) => {
         $or: [
           { name: { $regex: search, $options: "i" } },
           { email: { $regex: search, $options: "i" } },
-          { phoneNumber: { $regex: search, $options: "i" } },
         ],
       }).select("_id");
       userIds = matchingUsers.map((u) => u._id);
@@ -522,7 +521,6 @@ export const getAllPayrolls = async (req, res) => {
         $or: [
           { name: { $regex: search, $options: "i" } },
           { email: { $regex: search, $options: "i" } },
-          { phoneNumber: { $regex: search, $options: "i" } },
         ],
       }).select("_id");
       const userIds = matchingUsers.map((u) => u._id);
@@ -928,7 +926,6 @@ export const getAllAdvances = async (req, res) => {
         $or: [
           { name: { $regex: search, $options: "i" } },
           { email: { $regex: search, $options: "i" } },
-          { phoneNumber: { $regex: search, $options: "i" } },
         ],
       }).select("_id");
       const userIds = matchingUsers.map((u) => u._id);
