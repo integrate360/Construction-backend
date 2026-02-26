@@ -13,11 +13,13 @@ import {
   adminEditAttendance,
   adminAddAttendanceForUser,
   deleteAttendanceRecord,
+  getUserProjects
 } from "../controllers/attendanceController.js";
 
 const router = express.Router();
 router.post("/submit", authMiddleware, submitAttendance);
 router.get("/my", authMiddleware, getMyAttendance);
+router.get("/my-projects",authMiddleware, getUserProjects);
 router.get("/today/status", authMiddleware, getTodayAttendanceStatus);
 router.get("/daily-hours", authMiddleware, getDailyWorkingHours);
 router.get("/status", authMiddleware, getAttendanceStatus);
