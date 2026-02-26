@@ -1122,3 +1122,217 @@ export const deleteAttendanceRecord = async (req, res) => {
     });
   }
 };
+
+export const getProjectAttendanceAdmin = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const { date, viewMode = "daily" } = req.query;
+
+    let startDate, endDate;
+
+    // ----------------------------
+    // DATE FILTER RANGE
+    // ----------------------------
+    if (date) {
+      const selectedDate = new Date(date);
+
+      if (viewMode === "daily") {
+        startDate = new Date(selectedDate);
+        startDate.setHours(0, 0, 0, 0);
+        endDate = new Date(selectedDate);
+        endDate.setHours(23, 59, 59, 999);
+      } else if (viewMode === "weekly") {
+        const day = selectedDate.getDay();
+        const diffToMonday = day === 0 ? -6 : 1 - day;
+
+        startDate = new Date(selectedDate);
+        startDate.setDate(selectedDate.getDate() + diffToMonday);
+        startDate.setHours(0, 0, 0, 0);
+
+        endDate = new Date(startDate);
+        endDate.setDate(startDate.getDate() + 6);
+        endDate.setHours(23, 59, 59, 999);
+      } else if (viewMode === "monthly") {
+        startDate = new Date(
+          selectedDate.getFullYear(),
+          selectedDate.getMonth(),
+          1,
+        );
+        startDate.setHours(0, 0, 0, 0);
+        endDate = new Date(
+          selectedDate.getFullYear(),
+          selectedDate.getMonth() + 1,
+          0,
+        );
+        endDate.setHours(23, 59, 59, 999);
+      }
+    }
+
+    // ----------------------------
+    // QUERY FILTER (only for selecting records)
+    // ----------------------------
+    const query = { project: projectId };
+    if (startDate && endDate) {
+      query["history.createdAt"] = { $gte: startDate, $lte: endDate };
+    }
+
+    const attendance = await Attendance.find(query)
+      .populate("user", "name phoneNumber")
+      .sort({ createdAt: -1 });
+
+    // ----------------------------
+    // GROUP BY USER & COLLECT FULL HISTORY
+    // ----------------------------
+    const projectAttendance = {};
+
+    attendance.forEach((record) => {
+      const userId = record.user._id.toString();
+
+      if (!projectAttendance[userId]) {
+        projectAttendance[userId] = {
+          user: record.user,
+          attendance: [], // filtered docs list
+          fullHistory: [], // all-time history
+        };
+      }
+
+      // Always add full history (never filter it)
+      if (record.history) {
+        record.history.forEach((h) =>
+          projectAttendance[userId].fullHistory.push(h),
+        );
+      }
+
+      // Add full record to attendance list (not filtered!)
+      projectAttendance[userId].attendance.push({
+        ...record.toObject(),
+        history: record.history, // ALL TIME
+      });
+    });
+
+    // ----------------------------
+    // COMPUTE SUMMARY + WORKING TIME
+    // ----------------------------
+    Object.keys(projectAttendance).forEach((userId) => {
+      const userData = projectAttendance[userId];
+
+      // FULL history (for summary)
+      const fullHistory = [...userData.fullHistory].sort(
+        (a, b) => new Date(a.createdAt) - new Date(b.createdAt),
+      );
+
+      // FILTERED history (for workingTime only)
+      const rangeHistory = fullHistory.filter((h) => {
+        if (!startDate || !endDate) return true;
+        const d = new Date(h.createdAt);
+        return d >= startDate && d <= endDate;
+      });
+
+      // ----------------------------
+      // WORKING TIME (FILTERED)
+      // ----------------------------
+      let totalMinutes = 0;
+      let lastCheckIn = null;
+
+      rangeHistory.forEach((record) => {
+        if (record.attendanceType === "check-in") {
+          if (!lastCheckIn) lastCheckIn = record;
+        } else if (record.attendanceType === "check-out" && lastCheckIn) {
+          const diff =
+            new Date(record.createdAt) - new Date(lastCheckIn.createdAt);
+          const mins = Math.floor(diff / (1000 * 60));
+          if (mins > 0 && mins < 960) totalMinutes += mins;
+          lastCheckIn = null;
+        }
+      });
+
+      userData.workingTime = {
+        totalMinutes,
+        totalHours: parseFloat((totalMinutes / 60).toFixed(2)),
+        formatted: `${Math.floor(totalMinutes / 60)}h ${totalMinutes % 60}m`,
+      };
+
+      // ----------------------------
+      // DAILY WORKING TIME (ALL TIME)
+      // ----------------------------
+      const historyPerDay = {};
+      fullHistory.forEach((h) => {
+        const d = new Date(h.createdAt).toISOString().split("T")[0];
+        if (!historyPerDay[d]) historyPerDay[d] = [];
+        historyPerDay[d].push(h);
+      });
+
+      const dailyWorkingTime = {};
+      Object.keys(historyPerDay).forEach((d) => {
+        const dayRecs = historyPerDay[d].sort(
+          (a, b) => new Date(a.createdAt) - new Date(b.createdAt),
+        );
+        let mins = 0,
+          dayIn = null;
+
+        dayRecs.forEach((r) => {
+          if (r.attendanceType === "check-in") {
+            if (!dayIn) dayIn = r;
+          } else if (r.attendanceType === "check-out" && dayIn) {
+            const diff = new Date(r.createdAt) - new Date(dayIn.createdAt);
+            const m = Math.floor(diff / (1000 * 60));
+            if (m >= 1 && m < 960) mins += m;
+            dayIn = null;
+          }
+        });
+
+        dailyWorkingTime[d] = {
+          totalMinutes: mins,
+          totalHours: parseFloat((mins / 60).toFixed(2)),
+          formatted: `${Math.floor(mins / 60)}h ${mins % 60}m`,
+        };
+      });
+
+      // ----------------------------
+      // PRESENT DAYS (ALL TIME)
+      // ----------------------------
+      const uniqueDates = Object.keys(historyPerDay);
+
+      userData.attendanceSummary = {
+        presentDaysCount: uniqueDates.length,
+        presentDates: uniqueDates,
+        dailyWorkingTime,
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      attendance: projectAttendance,
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+};
+
+export const getUserProjects = async (req, res) => {
+  try {
+    const userId = req.params.userId || req.user._id;
+    const projects = await Project.find({
+      $or: [
+        { client: userId },
+        { site_manager: userId },
+        { labour: userId },
+        { createdBy: userId } 
+      ]
+    })
+    .select('_id projectName siteName'); 
+    res.status(200).json({
+      success: true,
+      count: projects.length,
+      data: projects
+    });
+
+  } catch (error) {
+    console.error("Error fetching user projects:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error fetching projects",
+      error: error.message
+    });
+  }
+};

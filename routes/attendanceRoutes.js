@@ -13,11 +13,7 @@ import {
   adminEditAttendance,
   adminAddAttendanceForUser,
   deleteAttendanceRecord,
-<<<<<<< HEAD
-  getUserProjects
-=======
   getProjectAttendanceAdmin,
->>>>>>> 8f80c5ae6b972a8c239c7e6e7d4604901a2cc4db
 } from "../controllers/attendanceController.js";
 
 const router = express.Router();
