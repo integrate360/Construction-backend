@@ -22,6 +22,7 @@ import {
   updateAdvance,
   deleteAdvance,
   getProjectAdvanceSummary,
+  downloadSalarySlip,
 } from "../controllers/salaryController.js";
 import authMiddleware from "../middleware/authmiddleware.js";
 
@@ -61,6 +62,8 @@ router.get("/advance", getAllAdvances);
 router.post("/advance", giveAdvance);
 
 router.get("/advance/summary/:projectId", getProjectAdvanceSummary);
+
+router.get("/payroll/:id/slip", downloadSalarySlip);
 
 router.get("/advance/user/:userId/:projectId", getUserAdvances);
 

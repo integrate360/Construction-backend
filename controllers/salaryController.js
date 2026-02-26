@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import { Payroll, SalaryStructure, Advance } from "../models/Salary.js";
 import { calcPayroll, getAttendanceSummary } from "../helpers/Payrollhelper.js";
+import { generateSalarySlipPDF } from "../helpers/generateSalarySlipPDF.js";
 
 export const createSalaryStructure = async (req, res) => {
   try {
@@ -1159,5 +1160,42 @@ export const getProjectAdvanceSummary = async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+
+
+export const downloadSalarySlip = async (req, res) => {
+  try {
+    const payroll = await Payroll.findById(req.params.id)
+      .populate({
+        path: "user",
+        select: "name email role phoneNumber profilePicture adharNumber panNumber",
+      })
+      .populate({
+        path: "project",
+        select: "projectName siteName location client site_manager",
+        populate: [
+          { path: "client",       select: "name email phoneNumber companyName" },
+          { path: "site_manager", select: "name email phoneNumber" },
+        ],
+      })
+      .populate({
+        path: "salaryStructure",
+        select: "salaryType rateAmount overtimeRate effectiveFrom",
+      })
+      .populate("createdBy", "name email role");
+
+    if (!payroll) {
+      return res.status(404).json({ success: false, message: "Payroll not found" });
+    }
+
+    // Stream the PDF directly to the client
+    generateSalarySlipPDF(payroll.toObject(), res);
+  } catch (error) {
+    // If headers not yet sent, respond with JSON error
+    if (!res.headersSent) {
+      res.status(500).json({ success: false, message: error.message });
+    }
   }
 };
