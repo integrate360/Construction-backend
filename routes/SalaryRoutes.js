@@ -23,6 +23,7 @@ import {
   deleteAdvance,
   getProjectAdvanceSummary,
   downloadSalarySlip,
+  getProjectUsers,
 } from "../controllers/salaryController.js";
 import authMiddleware from "../middleware/authmiddleware.js";
 
@@ -74,5 +75,7 @@ router.put("/advance/:id", updateAdvance);
 router.delete("/advance/:id", deleteAdvance);
 
 router.patch("/advance/:id/recover", recoverAdvance);
+
+router.get("/projects/:projectId/users", getProjectUsers);
 
 export default router;

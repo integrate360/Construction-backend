@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import { Payroll, SalaryStructure, Advance } from "../models/Salary.js";
 import { calcPayroll, getAttendanceSummary } from "../helpers/Payrollhelper.js";
 import { generateSalarySlipPDF } from "../helpers/generateSalarySlipPDF.js";
+import projectModel from "../models/Project.js";
 
 export const createSalaryStructure = async (req, res) => {
   try {
@@ -1197,5 +1198,72 @@ export const downloadSalarySlip = async (req, res) => {
     if (!res.headersSent) {
       res.status(500).json({ success: false, message: error.message });
     }
+  }
+};
+
+export const getProjectUsers = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+
+    if (!projectId) {
+      return res.status(400).json({
+        success: false,
+        message: "Project ID is required",
+      });
+    }
+
+    // Find project and populate both site_manager and labour fields
+    const project = await projectModel.findById(projectId) // Using projectModel
+      .populate({
+        path: "site_manager",
+        select: "name email phone role profileImage",
+      })
+      .populate({
+        path: "labour",
+        select: "name email phone role profileImage",
+      });
+
+    if (!project) {
+      return res.status(404).json({
+        success: false,
+        message: "Project not found",
+      });
+    }
+
+    // Rest of the code remains the same...
+    const allUsers = [];
+
+    if (project.site_manager) {
+      allUsers.push({
+        ...project.site_manager.toObject(),
+        userType: "site_manager",
+      });
+    }
+
+    if (project.labour && project.labour.length > 0) {
+      const labourUsers = project.labour.map(labour => ({
+        ...labour.toObject(),
+        userType: "labour",
+      }));
+      allUsers.push(...labourUsers);
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Project users fetched successfully",
+      data: {
+        site_manager: project.site_manager || null,
+        labour: project.labour || [],
+        allUsers: allUsers,
+        totalUsers: allUsers.length,
+      },
+    });
+  } catch (error) {
+    console.error("🔥 Get Project Users Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch project users",
+      error: error.message,
+    });
   }
 };
