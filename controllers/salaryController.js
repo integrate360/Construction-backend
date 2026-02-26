@@ -293,8 +293,7 @@ export const generatePayroll = async (req, res) => {
     if (!structure) {
       return res.status(404).json({
         success: false,
-        message:
-          "No active salary structure found for this user on this project",
+        message: "No active salary structure found for this user on this project",
       });
     }
 
@@ -317,6 +316,11 @@ export const generatePayroll = async (req, res) => {
       (sum, a) => sum + a.amountRecovered,
       0,
     );
+
+    // ✅ Calculate how much advance is being recovered in THIS payroll via deductions
+    const advanceRecoveryInThisPayroll = deductions
+      .filter((d) => d.reason === "advance_recovery")
+      .reduce((sum, d) => sum + (d.amount || 0), 0);
 
     const {
       basicSalary,
@@ -353,10 +357,38 @@ export const generatePayroll = async (req, res) => {
       grossSalary,
       netSalary,
       advancePaid: totalAdvancePaid,
-      advanceRecovered: totalAdvanceRecovered,
+      advanceRecovered: advanceRecoveryInThisPayroll, // ✅ use THIS payroll's recovery amount
       remarks,
       createdBy: req.user.id,
     });
+
+    // ✅ If there's advance recovery in deductions, update the Advance records
+    if (advanceRecoveryInThisPayroll > 0) {
+      let remainingToRecover = advanceRecoveryInThisPayroll;
+
+      // Apply recovery to oldest pending advances first (FIFO)
+      const advancesToRecover = await Advance.find({
+        user,
+        project,
+        recoveryStatus: { $ne: "recovered" },
+      }).sort({ givenDate: 1 }); // oldest first
+
+      for (const advance of advancesToRecover) {
+        if (remainingToRecover <= 0) break;
+
+        const advanceRemaining = advance.amount - advance.amountRecovered;
+        const recoverNow = Math.min(advanceRemaining, remainingToRecover);
+
+        advance.amountRecovered += recoverNow;
+        advance.recoveryStatus =
+          advance.amountRecovered >= advance.amount
+            ? "recovered"
+            : "partially_recovered";
+
+        await advance.save();
+        remainingToRecover -= recoverNow;
+      }
+    }
 
     // Populate the created payroll
     const populatedPayroll = await Payroll.findById(payroll._id)
@@ -1121,6 +1153,7 @@ export const recoverAdvance = async (req, res) => {
       });
     }
 
+    // ✅ Update advance
     advance.amountRecovered += amountToRecover;
     advance.recoveryStatus =
       advance.amountRecovered >= advance.amount
@@ -1128,8 +1161,16 @@ export const recoverAdvance = async (req, res) => {
         : "partially_recovered";
 
     await advance.save();
+    const latestPayroll = await Payroll.findOne({
+      user: advance.user,
+      project: advance.project,
+    }).sort({ createdAt: -1 });
 
-    // Populate the updated advance
+    if (latestPayroll) {
+      latestPayroll.advanceRecovered =
+        (latestPayroll.advanceRecovered || 0) + amountToRecover;
+      await latestPayroll.save();
+    }
     const updatedAdvance = await Advance.findById(advance._id)
       .populate("user", "name email role")
       .populate("project", "projectName siteName")
