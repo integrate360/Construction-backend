@@ -68,18 +68,19 @@ export const submitAttendance = async (req, res) => {
       });
     }
 
-    // 📏 Distance check
+    // 📏 Distance check - Updated to 30 meters max
     const [pLng, pLat] = project.location.coordinates.coordinates;
     const [uLng, uLat] = coordinates;
 
     const distance = getDistanceInMeters(pLat, pLng, uLat, uLng);
+    const MAX_ALLOWED_DISTANCE = 30; // Changed to 30 meters
 
-    if (distance > 10) {
+    if (distance > MAX_ALLOWED_DISTANCE) {
       return res.status(403).json({
         success: false,
         message: `You are ${distance.toFixed(
           2,
-        )} meters away. Max allowed is 10m.`,
+        )} meters away. Max allowed is ${MAX_ALLOWED_DISTANCE}m.`,
       });
     }
 
@@ -144,6 +145,7 @@ export const submitAttendance = async (req, res) => {
     });
   }
 };
+
 export const getMyAttendance = async (req, res) => {
   try {
     const userId = req.user._id; // Your user ID
