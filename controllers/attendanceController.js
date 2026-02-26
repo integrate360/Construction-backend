@@ -7,275 +7,143 @@ import User from "../models/User.js";
 
 export const submitAttendance = async (req, res) => {
   try {
-    console.log("📝 [ATTENDANCE] Starting attendance submission...");
-    console.log("📦 Request body:", JSON.stringify(req.body, null, 2));
-    console.log(
-      "👤 User:",
-      req.user
-        ? {
-            id: req.user._id,
-            role: req.user.role,
-            name: req.user.name,
-          }
-        : "No user found",
-    );
+    const { projectId, attendanceType, coordinates } = req.body;
 
-    const { projectId, attendanceType, selfieImage, coordinates } = req.body;
+    // ✅ get from middleware
+    const selfieImage = req.selfieImageUrl;
+
+    if (!selfieImage) {
+      return res.status(400).json({
+        success: false,
+        message: "Selfie upload failed",
+      });
+    }
 
     // 🔐 Auth
     if (!req.user) {
-      console.log("❌ [ATTENDANCE] Unauthorized: No user in request");
       return res.status(401).json({ success: false, message: "Unauthorized" });
     }
 
-    console.log("🔐 [ATTENDANCE] Checking user role...");
     if (req.user.role !== "labour") {
-      console.log(
-        `❌ [ATTENDANCE] Invalid role: ${req.user.role}. Expected: labour`,
-      );
       return res.status(403).json({
         success: false,
         message: "Only labour can mark attendance",
       });
     }
-    console.log("✅ [ATTENDANCE] User role verified: labour");
 
-    // 📋 Validate required fields
-    console.log("📋 [ATTENDANCE] Validating required fields...");
-    const missingFields = [];
-    if (!projectId) missingFields.push("projectId");
-    if (!attendanceType) missingFields.push("attendanceType");
-    if (!selfieImage) missingFields.push("selfieImage");
-    if (!coordinates) missingFields.push("coordinates");
+    // 📋 Validation
+    const missing = [];
+    if (!projectId) missing.push("projectId");
+    if (!attendanceType) missing.push("attendanceType");
+    if (!coordinates) missing.push("coordinates");
 
-    if (missingFields.length > 0) {
-      console.log("❌ [ATTENDANCE] Missing fields:", missingFields);
+    if (missing.length) {
       return res.status(400).json({
         success: false,
         message: "All fields are required",
-        missingFields,
+        missingFields: missing,
       });
     }
-    console.log("✅ [ATTENDANCE] All required fields present");
 
-    // 📍 Validate coordinates
-    console.log("📍 [ATTENDANCE] Validating coordinates:", coordinates);
     if (!Array.isArray(coordinates) || coordinates.length !== 2) {
-      console.log(
-        "❌ [ATTENDANCE] Invalid coordinates format. Expected [longitude, latitude], got:",
-        coordinates,
-      );
       return res.status(400).json({
         success: false,
         message: "Coordinates must be [longitude, latitude]",
       });
     }
-    console.log("✅ [ATTENDANCE] Coordinates format valid");
-    console.log(
-      `📍 User location - Longitude: ${coordinates[0]}, Latitude: ${coordinates[1]}`,
-    );
 
-    // 🔍 Find Project
-    console.log(`🔍 [ATTENDANCE] Looking for project with ID: ${projectId}`);
+    // 🔍 Find project
     const project = await Project.findById(projectId);
-
     if (!project) {
-      console.log("❌ [ATTENDANCE] Project not found with ID:", projectId);
       return res.status(400).json({
         success: false,
         message: "Project not found",
       });
     }
-    console.log("✅ [ATTENDANCE] Project found:", {
-      id: project._id,
-      name: project.projectName,
-      siteName: project.siteName,
-    });
 
-    // Check project location
-    console.log("📍 [ATTENDANCE] Checking project location configuration...");
     if (!project.location?.coordinates?.coordinates) {
-      console.log(
-        "❌ [ATTENDANCE] Project location not configured. Location data:",
-        project.location,
-      );
       return res.status(400).json({
         success: false,
         message: "Project location not configured",
       });
     }
-    console.log("✅ [ATTENDANCE] Project location configured");
 
-    // 📏 Distance calculation
-    const [projectLng, projectLat] = project.location.coordinates.coordinates;
-    const [userLng, userLat] = coordinates;
+    // 📏 Distance check
+    const [pLng, pLat] = project.location.coordinates.coordinates;
+    const [uLng, uLat] = coordinates;
 
-    console.log("📍 [ATTENDANCE] Project coordinates:", {
-      longitude: projectLng,
-      latitude: projectLat,
-    });
-    console.log("📍 [ATTENDANCE] User coordinates:", {
-      longitude: userLng,
-      latitude: userLat,
-    });
-
-    console.log("📏 [ATTENDANCE] Calculating distance...");
-    const distance = getDistanceInMeters(
-      projectLat,
-      projectLng,
-      userLat,
-      userLng,
-    );
-
-    console.log(
-      `📏 [ATTENDANCE] Calculated distance: ${distance.toFixed(2)} meters`,
-    );
+    const distance = getDistanceInMeters(pLat, pLng, uLat, uLng);
 
     if (distance > 10) {
-      console.log(
-        `❌ [ATTENDANCE] Distance exceeded limit: ${distance.toFixed(2)}m > 10m`,
-      );
-
-      // Create a user-friendly message with the distance
-      const distanceMessage = `You are not on site. You are ${distance.toFixed(2)} meters away from the project location. Maximum allowed distance is 10 meters.`;
-
       return res.status(403).json({
         success: false,
-        message: distanceMessage,
-        data: {
-          distance: distance.toFixed(2),
-          maxAllowed: 10,
-          isWithinRange: false,
-        },
+        message: `You are ${distance.toFixed(
+          2,
+        )} meters away. Max allowed is 10m.`,
       });
     }
-    console.log("✅ [ATTENDANCE] Distance within limit (≤ 10m)");
 
-    // 🔍 Find attendance document
-    console.log(
-      `🔍 [ATTENDANCE] Looking for attendance document - User: ${req.user._id}, Project: ${projectId}`,
-    );
-    let attendanceDoc = await Attendance.findOne({
+    // 📄 Attendance doc
+    let attendance = await Attendance.findOne({
       user: req.user._id,
       project: projectId,
     });
 
-    if (!attendanceDoc) {
-      console.log(
-        "🆕 [ATTENDANCE] No existing attendance found. Creating new document...",
-      );
-      attendanceDoc = await Attendance.create({
+    if (!attendance) {
+      attendance = await Attendance.create({
         user: req.user._id,
         project: projectId,
         history: [],
       });
-      console.log(
-        "✅ [ATTENDANCE] New attendance document created with ID:",
-        attendanceDoc._id,
-      );
-    } else {
-      console.log(
-        "✅ [ATTENDANCE] Existing attendance document found. ID:",
-        attendanceDoc._id,
-      );
-      console.log(
-        `📊 [ATTENDANCE] Current history entries: ${attendanceDoc.history.length}`,
-      );
     }
 
-    // 🔎 Check last history entry
-    const lastEntry = attendanceDoc.history[attendanceDoc.history.length - 1];
-    console.log(
-      "📜 [ATTENDANCE] Last history entry:",
-      lastEntry
-        ? {
-            type: lastEntry.attendanceType,
-            time: lastEntry.timestamp,
-            location: lastEntry.location?.coordinates,
-          }
-        : "No previous entries",
-    );
+    const last = attendance.history.at(-1);
 
-    // 🚫 Validation rules
-    console.log("🚫 [ATTENDANCE] Validating attendance rules...");
-    console.log(`Current action: ${attendanceType}`);
-
-    if (
-      attendanceType === "check-in" &&
-      lastEntry?.attendanceType === "check-in"
-    ) {
-      console.log("❌ [ATTENDANCE] Invalid: Already checked in");
+    if (attendanceType === "check-in" && last?.attendanceType === "check-in") {
       return res.status(400).json({
         success: false,
-        message: "Already checked in. Please check out first.",
+        message: "Already checked in",
       });
     }
 
     if (
       attendanceType === "check-out" &&
-      (!lastEntry || lastEntry.attendanceType !== "check-in")
+      (!last || last.attendanceType !== "check-in")
     ) {
-      console.log(
-        "❌ [ATTENDANCE] Invalid: Cannot check out without checking in first",
-      );
       return res.status(400).json({
         success: false,
-        message: "You must check in before checking out.",
+        message: "You must check in first",
       });
     }
 
-    console.log("✅ [ATTENDANCE] Attendance rules validation passed");
-
-    // ✅ Push to history
-    console.log("💾 [ATTENDANCE] Saving attendance record...");
-    const newEntry = {
+    // ✅ Save
+    attendance.history.push({
       attendanceType,
       selfieImage,
       location: {
         type: "Point",
         coordinates,
       },
-    };
-
-    console.log("📝 [ATTENDANCE] New entry:", {
-      ...newEntry,
-      selfieImage: "[BASE64_IMAGE_TRUNCATED]",
     });
 
-    attendanceDoc.history.push(newEntry);
-    await attendanceDoc.save();
-
-    console.log("✅ [ATTENDANCE] Attendance saved successfully!");
-    console.log(
-      `📊 [ATTENDANCE] Total history entries now: ${attendanceDoc.history.length}`,
-    );
-    console.log(`🕒 [ATTENDANCE] Timestamp: ${new Date().toISOString()}`);
+    await attendance.save();
 
     return res.status(201).json({
       success: true,
       message: "Attendance saved successfully",
       data: {
-        history: attendanceDoc.history,
+        history: attendance.history,
         distance: distance.toFixed(2),
-        isWithinRange: true,
       },
     });
   } catch (error) {
-    console.error("🔥 [ATTENDANCE] Error:", error);
-    console.error("📋 [ATTENDANCE] Error details:", {
-      name: error.name,
-      message: error.message,
-      stack: error.stack,
-      code: error.code,
-    });
-
+    console.error("🔥 Attendance Error:", error);
     return res.status(500).json({
       success: false,
-      message: error.message || "An error occurred while submitting attendance",
+      message: "Attendance submission failed",
     });
   }
 };
-
 export const getMyAttendance = async (req, res) => {
   try {
     const userId = req.user._id; // Your user ID

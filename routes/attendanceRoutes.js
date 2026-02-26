@@ -16,9 +16,19 @@ import {
   getProjectAttendanceAdmin,
   getUserProjects,
 } from "../controllers/attendanceController.js";
+import upload from "../middleware/uploadMiddleware.js";
+import { uploadSelfie } from "../helpers/uploadfiles.js";
 
 const router = express.Router();
-router.post("/submit", authMiddleware, submitAttendance);
+
+router.post(
+  "/submit",
+  authMiddleware,
+  upload.single("selfie"),
+  uploadSelfie,
+  submitAttendance
+);
+
 router.get("/my", authMiddleware, getMyAttendance);
 router.get("/my-projects",authMiddleware, getUserProjects);
 router.get("/today/status", authMiddleware, getTodayAttendanceStatus);
