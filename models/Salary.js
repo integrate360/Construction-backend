@@ -51,7 +51,7 @@ const salaryStructureSchema = new mongoose.Schema(
       required: true,
     },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 const deductionSchema = new mongoose.Schema(
   {
@@ -67,7 +67,7 @@ const deductionSchema = new mongoose.Schema(
     },
     note: { type: String, trim: true },
   },
-  { _id: false }
+  { _id: false },
 );
 
 const allowanceSchema = new mongoose.Schema(
@@ -84,7 +84,7 @@ const allowanceSchema = new mongoose.Schema(
     },
     note: { type: String, trim: true },
   },
-  { _id: false }
+  { _id: false },
 );
 
 const payrollSchema = new mongoose.Schema(
@@ -112,28 +112,28 @@ const payrollSchema = new mongoose.Schema(
 
     // Period
     periodStart: { type: Date, required: true },
-    periodEnd:   { type: Date, required: true },
+    periodEnd: { type: Date, required: true },
 
     // Attendance summary (auto-calculated from Attendance model)
-    totalWorkingDays:  { type: Number, default: 0 },
-    presentDays:       { type: Number, default: 0 },
-    absentDays:        { type: Number, default: 0 },
-    overtimeHours:     { type: Number, default: 0 },
+    totalWorkingDays: { type: Number, default: 0 },
+    presentDays: { type: Number, default: 0 },
+    absentDays: { type: Number, default: 0 },
+    overtimeHours: { type: Number, default: 0 },
 
     // Financials
-    basicSalary:       { type: Number, required: true, min: 0 }, // based on present days × rate
-    overtimePay:       { type: Number, default: 0, min: 0 },
-    allowances:        { type: [allowanceSchema], default: [] },
-    deductions:        { type: [deductionSchema], default: [] },
+    basicSalary: { type: Number, required: true, min: 0 }, // based on present days × rate
+    overtimePay: { type: Number, default: 0, min: 0 },
+    allowances: { type: [allowanceSchema], default: [] },
+    deductions: { type: [deductionSchema], default: [] },
 
-    totalAllowances:   { type: Number, default: 0 },
-    totalDeductions:   { type: Number, default: 0 },
-    grossSalary:       { type: Number, default: 0 }, // basicSalary + overtimePay + totalAllowances
-    netSalary:         { type: Number, default: 0 }, // grossSalary - totalDeductions
+    totalAllowances: { type: Number, default: 0 },
+    totalDeductions: { type: Number, default: 0 },
+    grossSalary: { type: Number, default: 0 }, // basicSalary + overtimePay + totalAllowances
+    netSalary: { type: Number, default: 0 }, // grossSalary - totalDeductions
 
     // Advance tracking
-    advancePaid:       { type: Number, default: 0 },
-    advanceRecovered:  { type: Number, default: 0 },
+    advancePaid: { type: Number, default: 0 },
+    advanceRecovered: { type: Number, default: 0 },
 
     // Payment
     paymentStatus: {
@@ -141,21 +141,21 @@ const payrollSchema = new mongoose.Schema(
       enum: ["pending", "partially_paid", "paid"],
       default: "pending",
     },
-    paymentDate:   { type: Date },
+    paymentDate: { type: Date },
     paymentMode: {
       type: String,
       enum: ["cash", "bank_transfer", "upi", "cheque"],
     },
     transactionReference: { type: String, trim: true },
 
-    remarks:   { type: String, trim: true },
+    remarks: { type: String, trim: true },
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
     },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 const advanceSchema = new mongoose.Schema(
@@ -170,9 +170,9 @@ const advanceSchema = new mongoose.Schema(
       ref: "Project",
       required: true,
     },
-    amount:         { type: Number, required: true, min: 0 },
-    reason:         { type: String, trim: true },
-    givenDate:      { type: Date, default: Date.now },
+    amount: { type: Number, required: true, min: 0 },
+    reason: { type: String, trim: true },
+    givenDate: { type: Date, default: Date.now },
     recoveryStatus: {
       type: String,
       enum: ["pending", "partially_recovered", "recovered"],
@@ -185,7 +185,7 @@ const advanceSchema = new mongoose.Schema(
       required: true,
     },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 // Indexes
@@ -193,6 +193,9 @@ payrollSchema.index({ user: 1, project: 1, periodStart: 1 });
 salaryStructureSchema.index({ user: 1, project: 1, isActive: 1 });
 advanceSchema.index({ user: 1, project: 1, recoveryStatus: 1 });
 
-export const SalaryStructure = mongoose.model("SalaryStructure", salaryStructureSchema);
-export const Payroll         = mongoose.model("Payroll", payrollSchema);
-export const Advance         = mongoose.model("Advance", advanceSchema);
+export const SalaryStructure = mongoose.model(
+  "SalaryStructure",
+  salaryStructureSchema,
+);
+export const Payroll = mongoose.model("Payroll", payrollSchema);
+export const Advance = mongoose.model("Advance", advanceSchema);
