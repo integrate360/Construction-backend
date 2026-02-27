@@ -27,7 +27,11 @@ router.get("/project/:projectId", getProjectPhotos);
 
 router.post("/upload/:projectId", uploadMultiple, uploadPhotos);
 
-router.post("/uploadSinglePhoto/upload-single/:projectId", uploadSingle, uploadSinglePhoto);
+router.post(
+  "/uploadSinglePhoto/upload-single/:projectId",
+  uploadSingle,
+  uploadSinglePhoto,
+);
 
 router.get("/photo/:photoId", getPhotoById);
 
