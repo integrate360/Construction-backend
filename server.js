@@ -11,6 +11,7 @@ import appointmentRoutes from "./routes/appointmentRoutes.js";
 import projectRoutes from "./routes/projectRoutes.js";
 import attendanceRoutes from "./routes/attendanceRoutes.js";
 import SalaryRoutes from "./routes/SalaryRoutes.js";
+import photoRoutes from "./routes/photoRoutes.js";
 
 dotenv.config({ quiet: true });
 
@@ -43,6 +44,7 @@ app.use("/api/appointments", appointmentRoutes);
 app.use("/api/projects", projectRoutes);
 app.use("/api/attendance", attendanceRoutes);
 app.use("/api/salary", SalaryRoutes);
+app.use("/api/photos", photoRoutes);
 
 // 404 Handler
 app.use((req, res) => {
