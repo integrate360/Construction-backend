@@ -37,28 +37,98 @@ export const getAllAttributes = async (req, res) => {
     console.log("👤 User ID:", req.user._id);
     console.log("🔑 User Role:", req.user.role);
 
+    /* ===============================
+       QUERY PARAMS
+    =============================== */
+    const {
+      search = "",
+      type,
+      minPrice,
+      maxPrice,
+      createdBy,
+      startDate,
+      endDate,
+      page = 1,
+      limit = 10,
+    } = req.query;
+
     let filter = {};
+
+    /* ===============================
+       ROLE BASED FILTER
+    =============================== */
 
     // super_admin → only own records
     if (req.user.role === "super_admin") {
       filter.createdBy = req.user._id;
-      console.log("🔍 Applied filter: createdBy =", req.user._id);
     }
 
-    // saas_admin → no filter (full access)
-    if (req.user.role === "saas_admin") {
-      console.log("🔓 saas_admin detected → full access");
+    // saas_admin → full access
+    if (req.user.role === "saas_admin" && createdBy) {
+      filter.createdBy = createdBy;
     }
+
+    /* ===============================
+       SEARCH (label + type)
+    =============================== */
+    if (search) {
+      filter.$or = [
+        { label: { $regex: search, $options: "i" } },
+        { type: { $regex: search, $options: "i" } },
+      ];
+    }
+
+    /* ===============================
+       FILTER BY TYPE
+    =============================== */
+    if (type) {
+      filter.type = type;
+    }
+
+    /* ===============================
+       FILTER BY PRICE RANGE
+    =============================== */
+    if (minPrice || maxPrice) {
+      filter.pricing = {};
+      if (minPrice) filter.pricing.$gte = Number(minPrice);
+      if (maxPrice) filter.pricing.$lte = Number(maxPrice);
+    }
+
+    /* ===============================
+       DATE FILTER
+    =============================== */
+    if (startDate || endDate) {
+      filter.createdAt = {};
+      if (startDate) filter.createdAt.$gte = new Date(startDate);
+      if (endDate) filter.createdAt.$lte = new Date(endDate);
+    }
+
+    /* ===============================
+       PAGINATION
+    =============================== */
+    const pageNumber = parseInt(page);
+    const pageSize = parseInt(limit);
+    const skip = (pageNumber - 1) * pageSize;
+
+    const total = await Attribute.countDocuments(filter);
 
     const attributes = await Attribute.find(filter)
       .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(pageSize)
       .populate("createdBy", "name email role");
 
     console.log("📦 Total attributes found:", attributes.length);
 
+    /* ===============================
+       RESPONSE
+    =============================== */
     res.status(200).json({
       success: true,
       count: attributes.length,
+      total,
+      currentPage: pageNumber,
+      totalPages: Math.ceil(total / pageSize),
       data: attributes,
     });
   } catch (error) {
