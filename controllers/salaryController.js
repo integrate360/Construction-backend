@@ -312,16 +312,13 @@ export const generatePayroll = async (req, res) => {
       (sum, a) => sum + a.amount,
       0,
     );
-    const totalAdvanceRecovered = pendingAdvances.reduce(
-      (sum, a) => sum + a.amountRecovered,
-      0,
-    );
 
-    // ✅ Calculate how much advance is being recovered in THIS payroll via deductions
+    // ✅ Calculate advance recovery amount from deductions
     const advanceRecoveryInThisPayroll = deductions
       .filter((d) => d.reason === "advance_recovery")
       .reduce((sum, d) => sum + (d.amount || 0), 0);
 
+    // ✅ Calculate payroll figures first to validate recovery against netSalary
     const {
       basicSalary,
       overtimePay,
@@ -337,6 +334,35 @@ export const generatePayroll = async (req, res) => {
       deductions,
     );
 
+    // ✅ Validate: advance recovery cannot exceed net salary (before recovery deduction)
+    // grossSalary + allowances - otherDeductions = available amount
+    const otherDeductions = deductions
+      .filter((d) => d.reason !== "advance_recovery")
+      .reduce((sum, d) => sum + (d.amount || 0), 0);
+
+    const maxRecoverable = grossSalary - otherDeductions;
+
+    if (advanceRecoveryInThisPayroll > maxRecoverable) {
+      return res.status(400).json({
+        success: false,
+        message: `Advance recovery ₹${advanceRecoveryInThisPayroll} cannot exceed net salary ₹${maxRecoverable}. Reduce the recovery amount.`,
+      });
+    }
+
+    // ✅ Validate: recovery amount cannot exceed total pending advance balance
+    const totalPendingAdvanceBalance = pendingAdvances.reduce(
+      (sum, a) => sum + (a.amount - a.amountRecovered),
+      0,
+    );
+
+    if (advanceRecoveryInThisPayroll > totalPendingAdvanceBalance) {
+      return res.status(400).json({
+        success: false,
+        message: `Advance recovery ₹${advanceRecoveryInThisPayroll} exceeds total pending advance balance ₹${totalPendingAdvanceBalance}.`,
+      });
+    }
+
+    // ✅ Create payroll
     const payroll = await Payroll.create({
       user,
       project,
@@ -357,21 +383,20 @@ export const generatePayroll = async (req, res) => {
       grossSalary,
       netSalary,
       advancePaid: totalAdvancePaid,
-      advanceRecovered: advanceRecoveryInThisPayroll, // ✅ use THIS payroll's recovery amount
+      advanceRecovered: advanceRecoveryInThisPayroll,
       remarks,
       createdBy: req.user.id,
     });
 
-    // ✅ If there's advance recovery in deductions, update the Advance records
+    // ✅ If advance recovery exists in deductions, update Advance records (FIFO - oldest first)
     if (advanceRecoveryInThisPayroll > 0) {
       let remainingToRecover = advanceRecoveryInThisPayroll;
 
-      // Apply recovery to oldest pending advances first (FIFO)
       const advancesToRecover = await Advance.find({
         user,
         project,
         recoveryStatus: { $ne: "recovered" },
-      }).sort({ givenDate: 1 }); // oldest first
+      }).sort({ givenDate: 1 }); // oldest first (FIFO)
 
       for (const advance of advancesToRecover) {
         if (remainingToRecover <= 0) break;
@@ -1149,8 +1174,34 @@ export const recoverAdvance = async (req, res) => {
     if (amountToRecover > remaining) {
       return res.status(400).json({
         success: false,
-        message: `Cannot recover more than remaining amount: ₹${remaining}`,
+        message: `Cannot recover more than remaining advance amount: ₹${remaining}`,
       });
+    }
+
+    // ✅ Check against latest payroll netSalary
+    const latestPayroll = await Payroll.findOne({
+      user: advance.user,
+      project: advance.project,
+    }).sort({ createdAt: -1 });
+
+    if (latestPayroll) {
+      const alreadyRecoveredInPayroll = latestPayroll.advanceRecovered || 0;
+      const maxRecoverable =
+        latestPayroll.netSalary - alreadyRecoveredInPayroll;
+
+      if (maxRecoverable <= 0) {
+        return res.status(400).json({
+          success: false,
+          message: `No recoverable amount left in the latest payroll. Net salary ₹${latestPayroll.netSalary} is already fully used for recovery.`,
+        });
+      }
+
+      if (amountToRecover > maxRecoverable) {
+        return res.status(400).json({
+          success: false,
+          message: `Cannot recover ₹${amountToRecover}. Maximum recoverable from latest payroll (Net: ₹${latestPayroll.netSalary}) is ₹${maxRecoverable}.`,
+        });
+      }
     }
 
     // ✅ Update advance
@@ -1161,16 +1212,15 @@ export const recoverAdvance = async (req, res) => {
         : "partially_recovered";
 
     await advance.save();
-    const latestPayroll = await Payroll.findOne({
-      user: advance.user,
-      project: advance.project,
-    }).sort({ createdAt: -1 });
 
+    // ✅ Update advanceRecovered on the latest payroll
     if (latestPayroll) {
       latestPayroll.advanceRecovered =
         (latestPayroll.advanceRecovered || 0) + amountToRecover;
       await latestPayroll.save();
     }
+
+    // Populate the updated advance
     const updatedAdvance = await Advance.findById(advance._id)
       .populate("user", "name email role")
       .populate("project", "projectName siteName")
