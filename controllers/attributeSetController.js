@@ -25,9 +25,7 @@ export const createAttributeSet = async (req, res) => {
   }
 };
 
-/**
- * GET ALL ATTRIBUTE SETS
- */
+
 export const getAllAttributeSets = async (req, res) => {
   try {
     console.log("👉 Get AttributeSets User:", {
@@ -35,23 +33,76 @@ export const getAllAttributeSets = async (req, res) => {
       role: req.user.role,
     });
 
+    /* ===============================
+       QUERY PARAMS
+    =============================== */
+    const {
+      search = "",
+      createdBy,
+      startDate,
+      endDate,
+      page = 1,
+      limit = 10,
+    } = req.query;
+
     let filter = {};
 
-    // saas_admin → all
+    /* ===============================
+       ROLE BASED FILTER
+    =============================== */
+    // saas_admin → see all
     if (req.user.role !== "saas_admin") {
       filter.createdBy = req.user._id;
     }
 
+    /* ===============================
+       SEARCH (by name)
+    =============================== */
+    if (search) {
+      filter.name = { $regex: search, $options: "i" };
+    }
+
+    /* ===============================
+       FILTER BY createdBy (only for saas_admin)
+    =============================== */
+    if (createdBy && req.user.role === "saas_admin") {
+      filter.createdBy = createdBy;
+    }
+
+    /* ===============================
+       DATE FILTER
+    =============================== */
+    if (startDate || endDate) {
+      filter.createdAt = {};
+      if (startDate) filter.createdAt.$gte = new Date(startDate);
+      if (endDate) filter.createdAt.$lte = new Date(endDate);
+    }
+
+    /* ===============================
+       PAGINATION LOGIC
+    =============================== */
+    const pageNumber = parseInt(page);
+    const pageSize = parseInt(limit);
+    const skip = (pageNumber - 1) * pageSize;
+
+    const total = await AttributeSet.countDocuments(filter);
+
     const attributeSets = await AttributeSet.find(filter)
       .populate("attributes")
-       .populate(
-      "createdBy"
-    )
-      .sort({ createdAt: -1 });
+      .populate("createdBy")
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(pageSize);
 
+    /* ===============================
+       RESPONSE
+    =============================== */
     res.status(200).json({
       success: true,
       count: attributeSets.length,
+      total,
+      currentPage: pageNumber,
+      totalPages: Math.ceil(total / pageSize),
       data: attributeSets,
     });
   } catch (error) {

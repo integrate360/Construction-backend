@@ -318,19 +318,13 @@ export const generatePayroll = async (req, res) => {
       0,
     );
 
-    // ✅ Remaining balance = total amount - already recovered
-    // e.g. advance amount 6799, amountRecovered 2300 → remaining 4499
+    // Total remaining advance balance
     const totalPendingAdvanceBalance = pendingAdvances.reduce(
       (sum, a) => sum + (a.amount - a.amountRecovered),
       0,
     );
 
-    // Extract advance recovery amount from deductions
-    const advanceRecoveryInThisPayroll = deductions
-      .filter((d) => d.reason === "advance_recovery")
-      .reduce((sum, d) => sum + (d.amount || 0), 0);
-
-    // Calculate gross salary WITHOUT advance_recovery deduction first
+    // Calculate gross first WITHOUT any advance_recovery deduction
     const deductionsWithoutAdvance = deductions.filter(
       (d) => d.reason !== "advance_recovery",
     );
@@ -350,32 +344,65 @@ export const generatePayroll = async (req, res) => {
       totalHoursWorked,
     );
 
-    // Max recoverable = gross - other deductions
+    // Salary available after other deductions
     const salaryBeforeAdvanceRecovery = grossSalary - totalDeductionsWithoutAdvance;
 
-    // ✅ Validate 1: recovery cannot exceed what labourer earned this period
-    if (advanceRecoveryInThisPayroll > salaryBeforeAdvanceRecovery) {
-      return res.status(400).json({
-        success: false,
-        message: `Advance recovery ₹${advanceRecoveryInThisPayroll} cannot exceed labourer's net earnings ₹${salaryBeforeAdvanceRecovery} for this period.`,
-      });
+    // ✅ Check if user manually sent advance_recovery in deductions
+    const manualAdvanceRecovery = deductions
+      .filter((d) => d.reason === "advance_recovery")
+      .reduce((sum, d) => sum + (d.amount || 0), 0);
+
+    // ✅ Auto calculate advance recovery if not manually sent
+    // Auto recover = min(salaryBeforeAdvanceRecovery, totalPendingAdvanceBalance)
+    let advanceRecoveryInThisPayroll = 0;
+    let finalDeductions = [...deductionsWithoutAdvance];
+
+    if (manualAdvanceRecovery > 0) {
+      // User manually sent advance recovery — validate it
+      if (manualAdvanceRecovery > salaryBeforeAdvanceRecovery) {
+        return res.status(400).json({
+          success: false,
+          message: `Advance recovery ₹${manualAdvanceRecovery} cannot exceed labourer's net earnings ₹${salaryBeforeAdvanceRecovery} for this period.`,
+        });
+      }
+
+      if (manualAdvanceRecovery > totalPendingAdvanceBalance) {
+        return res.status(400).json({
+          success: false,
+          message: `Advance recovery ₹${manualAdvanceRecovery} exceeds remaining advance balance ₹${totalPendingAdvanceBalance}.`,
+        });
+      }
+
+      advanceRecoveryInThisPayroll = manualAdvanceRecovery;
+      finalDeductions = [...deductionsWithoutAdvance, ...deductions.filter((d) => d.reason === "advance_recovery")];
+
+    } else if (totalPendingAdvanceBalance > 0) {
+      // ✅ Auto recover: take minimum of salary available vs pending balance
+      advanceRecoveryInThisPayroll = Math.min(
+        salaryBeforeAdvanceRecovery,
+        totalPendingAdvanceBalance,
+      );
+
+      if (advanceRecoveryInThisPayroll > 0) {
+        // ✅ Auto add advance_recovery to deductions
+        finalDeductions = [
+          ...deductionsWithoutAdvance,
+          {
+            reason: "advance_recovery",
+            amount: advanceRecoveryInThisPayroll,
+            note: "Auto recovered from pending advance",
+          },
+        ];
+      }
     }
 
-    // ✅ Validate 2: recovery cannot exceed REMAINING advance balance (after already recovered)
-    if (advanceRecoveryInThisPayroll > totalPendingAdvanceBalance) {
-      return res.status(400).json({
-        success: false,
-        message: `Advance recovery ₹${advanceRecoveryInThisPayroll} exceeds remaining advance balance ₹${totalPendingAdvanceBalance}. (Already recovered: ₹${pendingAdvances.reduce((sum, a) => sum + a.amountRecovered, 0)})`,
-      });
-    }
-
-    // Final calculation WITH all deductions including advance_recovery
+    // Final payroll calculation with all deductions including advance recovery
     const { totalDeductions, netSalary } = calcPayroll(
       structure,
       presentDays,
       overtimeHours,
       allowances,
-      deductions,
+      finalDeductions,
       totalHoursWorked,
     );
 
@@ -394,7 +421,7 @@ export const generatePayroll = async (req, res) => {
       basicSalary,
       overtimePay,
       allowances,
-      deductions,
+      deductions: finalDeductions, // ✅ includes auto advance_recovery
       totalAllowances,
       totalDeductions,
       grossSalary,
@@ -405,7 +432,7 @@ export const generatePayroll = async (req, res) => {
       createdBy: req.user.id,
     });
 
-    // ✅ Update Advance records FIFO — correctly accounts for amountRecovered
+    // ✅ Update Advance records FIFO
     if (advanceRecoveryInThisPayroll > 0) {
       let remainingToRecover = advanceRecoveryInThisPayroll;
 
@@ -413,12 +440,11 @@ export const generatePayroll = async (req, res) => {
         user,
         project,
         recoveryStatus: { $ne: "recovered" },
-      }).sort({ givenDate: 1 }); // oldest first
+      }).sort({ givenDate: 1 });
 
       for (const advance of advancesToRecover) {
         if (remainingToRecover <= 0) break;
 
-        // ✅ Use actual remaining on this advance (not full amount)
         const advanceRemaining = advance.amount - advance.amountRecovered;
         const recoverNow = Math.min(advanceRemaining, remainingToRecover);
 
