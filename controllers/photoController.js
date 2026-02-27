@@ -141,8 +141,21 @@ export const uploadSinglePhoto = async (req, res) => {
 export const getProjectPhotos = async (req, res) => {
   try {
     const { projectId } = req.params;
-    const { approved } = req.query;
+    const { 
+      approved, 
+      page = 1, 
+      limit = 10, 
+      search = "",
+      startDate,
+      endDate
+    } = req.query;
 
+    // Convert pagination params to numbers
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const skip = (pageNum - 1) * limitNum;
+
+    // Find photos document for the project
     const photosDoc = await Photos.findOne({ project: projectId })
       .populate("project", "name description")
       .populate("photos.approvedBy", "name email");
@@ -154,19 +167,53 @@ export const getProjectPhotos = async (req, res) => {
       });
     }
 
-    // Filter by approval status if requested
-    let photos = photosDoc.photos;
+    // Apply filters
+    let filteredPhotos = [...photosDoc.photos];
+
+    // Filter by approval status
     if (approved !== undefined) {
       const isApproved = approved === "true";
-      photos = photos.filter((photo) => photo.isApproved === isApproved);
+      filteredPhotos = filteredPhotos.filter((photo) => photo.isApproved === isApproved);
     }
 
+    // Filter by search term
+    if (search) {
+      const searchRegex = new RegExp(search, "i");
+      filteredPhotos = filteredPhotos.filter(
+        (photo) => 
+          searchRegex.test(photo.url) || 
+          (photo.cloudinaryId && searchRegex.test(photo.cloudinaryId))
+      );
+    }
+
+    // Filter by date range
+    if (startDate || endDate) {
+      filteredPhotos = filteredPhotos.filter((photo) => {
+        const photoDate = new Date(photo.createdAt);
+        let isValid = true;
+
+        if (startDate) {
+          isValid = isValid && photoDate >= new Date(startDate);
+        }
+        if (endDate) {
+          isValid = isValid && photoDate <= new Date(endDate);
+        }
+
+        return isValid;
+      });
+    }
+
+    // Apply pagination (sort by createdAt desc by default)
+    const sortedPhotos = filteredPhotos.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    const paginatedPhotos = sortedPhotos.slice(skip, skip + limitNum);
+
+    // EXACT SAME RESPONSE FORMAT - no additional fields
     res.status(200).json({
       success: true,
       data: {
         project: photosDoc.project,
-        photos: photos,
-        totalCount: photos.length,
+        photos: paginatedPhotos,
+        totalCount: filteredPhotos.length, // This now reflects filtered total
       },
     });
   } catch (error) {
