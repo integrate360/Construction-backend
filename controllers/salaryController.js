@@ -318,7 +318,8 @@ export const generatePayroll = async (req, res) => {
       0,
     );
 
-    // Total pending advance balance
+    // ✅ Remaining balance = total amount - already recovered
+    // e.g. advance amount 6799, amountRecovered 2300 → remaining 4499
     const totalPendingAdvanceBalance = pendingAdvances.reduce(
       (sum, a) => sum + (a.amount - a.amountRecovered),
       0,
@@ -346,13 +347,13 @@ export const generatePayroll = async (req, res) => {
       overtimeHours,
       allowances,
       deductionsWithoutAdvance,
-      totalHoursWorked, // ✅
+      totalHoursWorked,
     );
 
-    // Max recoverable = gross - other deductions (not advance_recovery)
+    // Max recoverable = gross - other deductions
     const salaryBeforeAdvanceRecovery = grossSalary - totalDeductionsWithoutAdvance;
 
-    // Validate 1: recovery cannot exceed what labourer earned
+    // ✅ Validate 1: recovery cannot exceed what labourer earned this period
     if (advanceRecoveryInThisPayroll > salaryBeforeAdvanceRecovery) {
       return res.status(400).json({
         success: false,
@@ -360,11 +361,11 @@ export const generatePayroll = async (req, res) => {
       });
     }
 
-    // Validate 2: recovery cannot exceed total pending advance balance
+    // ✅ Validate 2: recovery cannot exceed REMAINING advance balance (after already recovered)
     if (advanceRecoveryInThisPayroll > totalPendingAdvanceBalance) {
       return res.status(400).json({
         success: false,
-        message: `Advance recovery ₹${advanceRecoveryInThisPayroll} exceeds total pending advance balance ₹${totalPendingAdvanceBalance}.`,
+        message: `Advance recovery ₹${advanceRecoveryInThisPayroll} exceeds remaining advance balance ₹${totalPendingAdvanceBalance}. (Already recovered: ₹${pendingAdvances.reduce((sum, a) => sum + a.amountRecovered, 0)})`,
       });
     }
 
@@ -375,7 +376,7 @@ export const generatePayroll = async (req, res) => {
       overtimeHours,
       allowances,
       deductions,
-      totalHoursWorked, // ✅
+      totalHoursWorked,
     );
 
     // Create payroll
@@ -404,7 +405,7 @@ export const generatePayroll = async (req, res) => {
       createdBy: req.user.id,
     });
 
-    // Update Advance records using FIFO (oldest advance recovered first)
+    // ✅ Update Advance records FIFO — correctly accounts for amountRecovered
     if (advanceRecoveryInThisPayroll > 0) {
       let remainingToRecover = advanceRecoveryInThisPayroll;
 
@@ -412,11 +413,12 @@ export const generatePayroll = async (req, res) => {
         user,
         project,
         recoveryStatus: { $ne: "recovered" },
-      }).sort({ givenDate: 1 });
+      }).sort({ givenDate: 1 }); // oldest first
 
       for (const advance of advancesToRecover) {
         if (remainingToRecover <= 0) break;
 
+        // ✅ Use actual remaining on this advance (not full amount)
         const advanceRemaining = advance.amount - advance.amountRecovered;
         const recoverNow = Math.min(advanceRemaining, remainingToRecover);
 
