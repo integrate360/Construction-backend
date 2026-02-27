@@ -298,8 +298,13 @@ export const generatePayroll = async (req, res) => {
     }
 
     // Get attendance summary
-    const { presentDays, absentDays, totalWorkingDays, attendanceRecords } =
-      await getAttendanceSummary(user, project, periodStart, periodEnd);
+    const {
+      presentDays,
+      absentDays,
+      totalWorkingDays,
+      totalHoursWorked,
+      attendanceRecords,
+    } = await getAttendanceSummary(user, project, periodStart, periodEnd);
 
     // Get pending advances
     const pendingAdvances = await Advance.find({
@@ -313,19 +318,18 @@ export const generatePayroll = async (req, res) => {
       0,
     );
 
-    // ✅ Total pending advance balance (how much is still owed)
+    // Total pending advance balance
     const totalPendingAdvanceBalance = pendingAdvances.reduce(
       (sum, a) => sum + (a.amount - a.amountRecovered),
       0,
     );
 
-    // ✅ Extract advance recovery amount from deductions
+    // Extract advance recovery amount from deductions
     const advanceRecoveryInThisPayroll = deductions
       .filter((d) => d.reason === "advance_recovery")
       .reduce((sum, d) => sum + (d.amount || 0), 0);
 
-    // ✅ Calculate gross salary WITHOUT advance_recovery deduction
-    // so we know the true earning capacity before recovery is applied
+    // Calculate gross salary WITHOUT advance_recovery deduction first
     const deductionsWithoutAdvance = deductions.filter(
       (d) => d.reason !== "advance_recovery",
     );
@@ -341,14 +345,14 @@ export const generatePayroll = async (req, res) => {
       presentDays,
       overtimeHours,
       allowances,
-      deductionsWithoutAdvance, // ✅ exclude advance_recovery for clean gross calculation
+      deductionsWithoutAdvance,
+      totalHoursWorked, // ✅
     );
 
-    // ✅ Max recoverable = gross salary - other deductions (not advance_recovery)
-    // This is the actual take-home before advance recovery is applied
+    // Max recoverable = gross - other deductions (not advance_recovery)
     const salaryBeforeAdvanceRecovery = grossSalary - totalDeductionsWithoutAdvance;
 
-    // ✅ Validate 1: Recovery cannot exceed what the labourer earned this period
+    // Validate 1: recovery cannot exceed what labourer earned
     if (advanceRecoveryInThisPayroll > salaryBeforeAdvanceRecovery) {
       return res.status(400).json({
         success: false,
@@ -356,7 +360,7 @@ export const generatePayroll = async (req, res) => {
       });
     }
 
-    // ✅ Validate 2: Recovery cannot exceed total pending advance balance
+    // Validate 2: recovery cannot exceed total pending advance balance
     if (advanceRecoveryInThisPayroll > totalPendingAdvanceBalance) {
       return res.status(400).json({
         success: false,
@@ -364,19 +368,17 @@ export const generatePayroll = async (req, res) => {
       });
     }
 
-    // ✅ Now calculate final payroll WITH all deductions (including advance_recovery)
-    const {
-      totalDeductions,
-      netSalary,
-    } = calcPayroll(
+    // Final calculation WITH all deductions including advance_recovery
+    const { totalDeductions, netSalary } = calcPayroll(
       structure,
       presentDays,
       overtimeHours,
       allowances,
-      deductions, // full deductions including advance_recovery
+      deductions,
+      totalHoursWorked, // ✅
     );
 
-    // ✅ Create payroll
+    // Create payroll
     const payroll = await Payroll.create({
       user,
       project,
@@ -402,7 +404,7 @@ export const generatePayroll = async (req, res) => {
       createdBy: req.user.id,
     });
 
-    // ✅ Update Advance records using FIFO (oldest advance recovered first)
+    // Update Advance records using FIFO (oldest advance recovered first)
     if (advanceRecoveryInThisPayroll > 0) {
       let remainingToRecover = advanceRecoveryInThisPayroll;
 
@@ -410,7 +412,7 @@ export const generatePayroll = async (req, res) => {
         user,
         project,
         recoveryStatus: { $ne: "recovered" },
-      }).sort({ givenDate: 1 }); // oldest first
+      }).sort({ givenDate: 1 });
 
       for (const advance of advancesToRecover) {
         if (remainingToRecover <= 0) break;
