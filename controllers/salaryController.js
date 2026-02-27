@@ -328,7 +328,7 @@ export const generatePayroll = async (req, res) => {
       0,
     );
 
-    // Calculate gross first WITHOUT any advance_recovery deduction
+    // Calculate gross WITHOUT advance_recovery deduction
     const deductionsWithoutAdvance = deductions.filter(
       (d) => d.reason !== "advance_recovery",
     );
@@ -360,7 +360,7 @@ export const generatePayroll = async (req, res) => {
     let finalDeductions = [...deductionsWithoutAdvance];
 
     if (manualAdvanceRecovery > 0) {
-      // User manually sent advance recovery — validate it
+      // ✅ Validate manual recovery cannot exceed net earnings
       if (manualAdvanceRecovery > salaryBeforeAdvanceRecovery) {
         return res.status(400).json({
           success: false,
@@ -368,6 +368,7 @@ export const generatePayroll = async (req, res) => {
         });
       }
 
+      // ✅ Validate manual recovery cannot exceed remaining advance balance
       if (manualAdvanceRecovery > totalPendingAdvanceBalance) {
         return res.status(400).json({
           success: false,
@@ -380,26 +381,10 @@ export const generatePayroll = async (req, res) => {
         ...deductionsWithoutAdvance,
         ...deductions.filter((d) => d.reason === "advance_recovery"),
       ];
-    } else if (totalPendingAdvanceBalance > 0) {
-      // Auto recover: take minimum of salary available vs pending balance
-      advanceRecoveryInThisPayroll = Math.min(
-        salaryBeforeAdvanceRecovery,
-        totalPendingAdvanceBalance,
-      );
-
-      if (advanceRecoveryInThisPayroll > 0) {
-        finalDeductions = [
-          ...deductionsWithoutAdvance,
-          {
-            reason: "advance_recovery",
-            amount: advanceRecoveryInThisPayroll,
-            // ✅ no note
-          },
-        ];
-      }
     }
+    // ✅ No auto recovery — deductions stay as is if no advance_recovery sent
 
-    // Final payroll calculation with all deductions including advance recovery
+    // Final payroll calculation with all deductions
     const { totalDeductions, netSalary } = calcPayroll(
       structure,
       presentDays,
@@ -435,7 +420,7 @@ export const generatePayroll = async (req, res) => {
       createdBy: req.user.id,
     });
 
-    // Update Advance records FIFO (oldest first)
+    // Update Advance records FIFO (oldest first) only if manual recovery sent
     if (advanceRecoveryInThisPayroll > 0) {
       let remainingToRecover = advanceRecoveryInThisPayroll;
 
