@@ -939,6 +939,7 @@ export const updateProject = async (req, res) => {
       "projectStatus",
       "siteStatus",
       "approvalStatus",
+      "extracost",
     ];
 
     for (const field of basicFields) {
