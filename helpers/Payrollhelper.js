@@ -14,14 +14,18 @@ const calcPayroll = (
   } else if (structure.salaryType === "monthly") {
     basicSalary = structure.rateAmount;
   } else if (structure.salaryType === "hourly") {
+    // ✅ Fixed: hourly = rateAmount * presentDays * 8 hours per day
     basicSalary = structure.rateAmount * presentDays * 8;
   }
 
   const overtimePay = (structure.overtimeRate || 0) * overtimeHours;
-  const totalAllowances = allowances.reduce((sum, a) => sum + a.amount, 0);
-  const totalDeductions = deductions.reduce((sum, d) => sum + d.amount, 0);
+  const totalAllowances = allowances.reduce((sum, a) => sum + (a.amount || 0), 0);
+  const totalDeductions = deductions.reduce((sum, d) => sum + (d.amount || 0), 0);
+
   const grossSalary = basicSalary + overtimePay + totalAllowances;
-  const netSalary = grossSalary - totalDeductions;
+
+  // ✅ netSalary should never go below 0
+  const netSalary = Math.max(0, grossSalary - totalDeductions);
 
   return {
     basicSalary,

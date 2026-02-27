@@ -313,54 +313,68 @@ export const generatePayroll = async (req, res) => {
       0,
     );
 
-    // ✅ Calculate advance recovery amount from deductions
-    const advanceRecoveryInThisPayroll = deductions
-      .filter((d) => d.reason === "advance_recovery")
-      .reduce((sum, d) => sum + (d.amount || 0), 0);
-
-    // ✅ Calculate payroll figures first to validate recovery against netSalary
-    const {
-      basicSalary,
-      overtimePay,
-      totalAllowances,
-      totalDeductions,
-      grossSalary,
-      netSalary,
-    } = calcPayroll(
-      structure,
-      presentDays,
-      overtimeHours,
-      allowances,
-      deductions,
-    );
-
-    // ✅ Validate: advance recovery cannot exceed net salary (before recovery deduction)
-    // grossSalary + allowances - otherDeductions = available amount
-    const otherDeductions = deductions
-      .filter((d) => d.reason !== "advance_recovery")
-      .reduce((sum, d) => sum + (d.amount || 0), 0);
-
-    const maxRecoverable = grossSalary - otherDeductions;
-
-    if (advanceRecoveryInThisPayroll > maxRecoverable) {
-      return res.status(400).json({
-        success: false,
-        message: `Advance recovery ₹${advanceRecoveryInThisPayroll} cannot exceed net salary ₹${maxRecoverable}. Reduce the recovery amount.`,
-      });
-    }
-
-    // ✅ Validate: recovery amount cannot exceed total pending advance balance
+    // ✅ Total pending advance balance (how much is still owed)
     const totalPendingAdvanceBalance = pendingAdvances.reduce(
       (sum, a) => sum + (a.amount - a.amountRecovered),
       0,
     );
 
+    // ✅ Extract advance recovery amount from deductions
+    const advanceRecoveryInThisPayroll = deductions
+      .filter((d) => d.reason === "advance_recovery")
+      .reduce((sum, d) => sum + (d.amount || 0), 0);
+
+    // ✅ Calculate gross salary WITHOUT advance_recovery deduction
+    // so we know the true earning capacity before recovery is applied
+    const deductionsWithoutAdvance = deductions.filter(
+      (d) => d.reason !== "advance_recovery",
+    );
+
+    const {
+      basicSalary,
+      overtimePay,
+      totalAllowances,
+      totalDeductions: totalDeductionsWithoutAdvance,
+      grossSalary,
+    } = calcPayroll(
+      structure,
+      presentDays,
+      overtimeHours,
+      allowances,
+      deductionsWithoutAdvance, // ✅ exclude advance_recovery for clean gross calculation
+    );
+
+    // ✅ Max recoverable = gross salary - other deductions (not advance_recovery)
+    // This is the actual take-home before advance recovery is applied
+    const salaryBeforeAdvanceRecovery = grossSalary - totalDeductionsWithoutAdvance;
+
+    // ✅ Validate 1: Recovery cannot exceed what the labourer earned this period
+    if (advanceRecoveryInThisPayroll > salaryBeforeAdvanceRecovery) {
+      return res.status(400).json({
+        success: false,
+        message: `Advance recovery ₹${advanceRecoveryInThisPayroll} cannot exceed labourer's net earnings ₹${salaryBeforeAdvanceRecovery} for this period.`,
+      });
+    }
+
+    // ✅ Validate 2: Recovery cannot exceed total pending advance balance
     if (advanceRecoveryInThisPayroll > totalPendingAdvanceBalance) {
       return res.status(400).json({
         success: false,
         message: `Advance recovery ₹${advanceRecoveryInThisPayroll} exceeds total pending advance balance ₹${totalPendingAdvanceBalance}.`,
       });
     }
+
+    // ✅ Now calculate final payroll WITH all deductions (including advance_recovery)
+    const {
+      totalDeductions,
+      netSalary,
+    } = calcPayroll(
+      structure,
+      presentDays,
+      overtimeHours,
+      allowances,
+      deductions, // full deductions including advance_recovery
+    );
 
     // ✅ Create payroll
     const payroll = await Payroll.create({
@@ -388,7 +402,7 @@ export const generatePayroll = async (req, res) => {
       createdBy: req.user.id,
     });
 
-    // ✅ If advance recovery exists in deductions, update Advance records (FIFO - oldest first)
+    // ✅ Update Advance records using FIFO (oldest advance recovered first)
     if (advanceRecoveryInThisPayroll > 0) {
       let remainingToRecover = advanceRecoveryInThisPayroll;
 
@@ -396,7 +410,7 @@ export const generatePayroll = async (req, res) => {
         user,
         project,
         recoveryStatus: { $ne: "recovered" },
-      }).sort({ givenDate: 1 }); // oldest first (FIFO)
+      }).sort({ givenDate: 1 }); // oldest first
 
       for (const advance of advancesToRecover) {
         if (remainingToRecover <= 0) break;
@@ -444,7 +458,6 @@ export const generatePayroll = async (req, res) => {
     res.status(400).json({ success: false, message: error.message });
   }
 };
-
 export const generateBulkPayroll = async (req, res) => {
   try {
     const {
