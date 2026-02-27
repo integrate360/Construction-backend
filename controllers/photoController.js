@@ -1,20 +1,20 @@
 import Photos from "../models/Progressphotos.js";
 import Project from "../models/Project.js";
-import { uploadMultipleToCloudinary, deleteFromCloudinary } from "../helpers/cloudinaryUpload.js";
+import {
+  uploadMultipleToCloudinary,
+  deleteFromCloudinary,
+} from "../helpers/cloudinaryUpload.js";
 
-// @desc    Upload photos to a project
-// @route   POST /api/photos/upload/:projectId
-// @access  Private
 export const uploadPhotos = async (req, res) => {
   try {
     const { projectId } = req.params;
-    
+
     // Check if project exists
     const project = await Project.findById(projectId);
     if (!project) {
       return res.status(404).json({
         success: false,
-        message: "Project not found"
+        message: "Project not found",
       });
     }
 
@@ -22,17 +22,17 @@ export const uploadPhotos = async (req, res) => {
     if (!req.files || req.files.length === 0) {
       return res.status(400).json({
         success: false,
-        message: "Please upload at least one photo"
+        message: "Please upload at least one photo",
       });
     }
 
     // Find or create photos document for this project
     let photosDoc = await Photos.findOne({ project: projectId });
-    
+
     if (!photosDoc) {
       photosDoc = new Photos({
         project: projectId,
-        photos: []
+        photos: [],
       });
     }
 
@@ -42,14 +42,14 @@ export const uploadPhotos = async (req, res) => {
 
     // Add photos to database
     const uploadedPhotos = [];
-    
+
     for (const result of uploadResults) {
       const newPhoto = {
         url: result.url,
         cloudinaryId: result.publicId, // You might want to add this to your schema
         isApproved: false,
         approvedBy: null,
-        approvedAt: null
+        approvedAt: null,
       };
 
       photosDoc.photos.push(newPhoto);
@@ -63,32 +63,29 @@ export const uploadPhotos = async (req, res) => {
       message: `${uploadedPhotos.length} photos uploaded successfully`,
       data: {
         project: projectId,
-        photos: uploadedPhotos
-      }
+        photos: uploadedPhotos,
+      },
     });
   } catch (error) {
     console.error("Upload photos error:", error);
     res.status(500).json({
       success: false,
       message: "Error uploading photos",
-      error: error.message
+      error: error.message,
     });
   }
 };
 
-// @desc    Upload single photo (alternative method)
-// @route   POST /api/photos/upload-single/:projectId
-// @access  Private
 export const uploadSinglePhoto = async (req, res) => {
   try {
     const { projectId } = req.params;
-    
+
     // Check if project exists
     const project = await Project.findById(projectId);
     if (!project) {
       return res.status(404).json({
         success: false,
-        message: "Project not found"
+        message: "Project not found",
       });
     }
 
@@ -96,17 +93,17 @@ export const uploadSinglePhoto = async (req, res) => {
     if (!req.file) {
       return res.status(400).json({
         success: false,
-        message: "Please upload a photo"
+        message: "Please upload a photo",
       });
     }
 
     // Find or create photos document for this project
     let photosDoc = await Photos.findOne({ project: projectId });
-    
+
     if (!photosDoc) {
       photosDoc = new Photos({
         project: projectId,
-        photos: []
+        photos: [],
       });
     }
 
@@ -120,7 +117,7 @@ export const uploadSinglePhoto = async (req, res) => {
       cloudinaryId: uploadResult.publicId,
       isApproved: false,
       approvedBy: null,
-      approvedAt: null
+      approvedAt: null,
     };
 
     photosDoc.photos.push(newPhoto);
@@ -129,21 +126,18 @@ export const uploadSinglePhoto = async (req, res) => {
     res.status(201).json({
       success: true,
       message: "Photo uploaded successfully",
-      data: newPhoto
+      data: newPhoto,
     });
   } catch (error) {
     console.error("Upload single photo error:", error);
     res.status(500).json({
       success: false,
       message: "Error uploading photo",
-      error: error.message
+      error: error.message,
     });
   }
 };
 
-// @desc    Get all photos for a project
-// @route   GET /api/photos/project/:projectId
-// @access  Private
 export const getProjectPhotos = async (req, res) => {
   try {
     const { projectId } = req.params;
@@ -156,7 +150,7 @@ export const getProjectPhotos = async (req, res) => {
     if (!photosDoc) {
       return res.status(404).json({
         success: false,
-        message: "No photos found for this project"
+        message: "No photos found for this project",
       });
     }
 
@@ -164,7 +158,7 @@ export const getProjectPhotos = async (req, res) => {
     let photos = photosDoc.photos;
     if (approved !== undefined) {
       const isApproved = approved === "true";
-      photos = photos.filter(photo => photo.isApproved === isApproved);
+      photos = photos.filter((photo) => photo.isApproved === isApproved);
     }
 
     res.status(200).json({
@@ -172,56 +166,51 @@ export const getProjectPhotos = async (req, res) => {
       data: {
         project: photosDoc.project,
         photos: photos,
-        totalCount: photos.length
-      }
+        totalCount: photos.length,
+      },
     });
   } catch (error) {
     console.error("Get project photos error:", error);
     res.status(500).json({
       success: false,
       message: "Error fetching photos",
-      error: error.message
+      error: error.message,
     });
   }
 };
 
-// @desc    Get single photo by ID
-// @route   GET /api/photos/:photoId
-// @access  Private
 export const getPhotoById = async (req, res) => {
   try {
     const { photoId } = req.params;
 
     const photosDoc = await Photos.findOne(
       { "photos._id": photoId },
-      { "photos.$": 1, project: 1 }
-    ).populate("project", "name description")
-     .populate("photos.approvedBy", "name email");
+      { "photos.$": 1, project: 1 },
+    )
+      .populate("project", "name description")
+      .populate("photos.approvedBy", "name email");
 
     if (!photosDoc || !photosDoc.photos || photosDoc.photos.length === 0) {
       return res.status(404).json({
         success: false,
-        message: "Photo not found"
+        message: "Photo not found",
       });
     }
 
     res.status(200).json({
       success: true,
-      data: photosDoc.photos[0]
+      data: photosDoc.photos[0],
     });
   } catch (error) {
     console.error("Get photo by ID error:", error);
     res.status(500).json({
       success: false,
       message: "Error fetching photo",
-      error: error.message
+      error: error.message,
     });
   }
 };
 
-// @desc    Approve a photo
-// @route   PUT /api/photos/:photoId/approve
-// @access  Private (Admin/Manager only)
 export const approvePhoto = async (req, res) => {
   try {
     const { photoId } = req.params;
@@ -232,7 +221,7 @@ export const approvePhoto = async (req, res) => {
     if (!photosDoc) {
       return res.status(404).json({
         success: false,
-        message: "Photo not found"
+        message: "Photo not found",
       });
     }
 
@@ -241,7 +230,7 @@ export const approvePhoto = async (req, res) => {
     if (!photo) {
       return res.status(404).json({
         success: false,
-        message: "Photo not found"
+        message: "Photo not found",
       });
     }
 
@@ -254,21 +243,18 @@ export const approvePhoto = async (req, res) => {
     res.status(200).json({
       success: true,
       message: "Photo approved successfully",
-      data: photo
+      data: photo,
     });
   } catch (error) {
     console.error("Approve photo error:", error);
     res.status(500).json({
       success: false,
       message: "Error approving photo",
-      error: error.message
+      error: error.message,
     });
   }
 };
 
-// @desc    Reject a photo
-// @route   PUT /api/photos/:photoId/reject
-// @access  Private (Admin/Manager only)
 export const rejectPhoto = async (req, res) => {
   try {
     const { photoId } = req.params;
@@ -278,7 +264,7 @@ export const rejectPhoto = async (req, res) => {
     if (!photosDoc) {
       return res.status(404).json({
         success: false,
-        message: "Photo not found"
+        message: "Photo not found",
       });
     }
 
@@ -286,7 +272,7 @@ export const rejectPhoto = async (req, res) => {
     if (!photo) {
       return res.status(404).json({
         success: false,
-        message: "Photo not found"
+        message: "Photo not found",
       });
     }
 
@@ -299,21 +285,18 @@ export const rejectPhoto = async (req, res) => {
     res.status(200).json({
       success: true,
       message: "Photo rejected successfully",
-      data: photo
+      data: photo,
     });
   } catch (error) {
     console.error("Reject photo error:", error);
     res.status(500).json({
       success: false,
       message: "Error rejecting photo",
-      error: error.message
+      error: error.message,
     });
   }
 };
 
-// @desc    Delete a photo
-// @route   DELETE /api/photos/:photoId
-// @access  Private
 export const deletePhoto = async (req, res) => {
   try {
     const { photoId } = req.params;
@@ -323,7 +306,7 @@ export const deletePhoto = async (req, res) => {
     if (!photosDoc) {
       return res.status(404).json({
         success: false,
-        message: "Photo not found"
+        message: "Photo not found",
       });
     }
 
@@ -331,7 +314,7 @@ export const deletePhoto = async (req, res) => {
     if (!photo) {
       return res.status(404).json({
         success: false,
-        message: "Photo not found"
+        message: "Photo not found",
       });
     }
 
@@ -341,9 +324,9 @@ export const deletePhoto = async (req, res) => {
     } else {
       // Fallback: extract public_id from URL
       try {
-        const urlParts = photo.url.split('/');
+        const urlParts = photo.url.split("/");
         const fileName = urlParts[urlParts.length - 1];
-        const publicId = `projects/${photosDoc.project}/photos/${fileName.split('.')[0]}`;
+        const publicId = `projects/${photosDoc.project}/photos/${fileName.split(".")[0]}`;
         await deleteFromCloudinary(publicId);
       } catch (cloudinaryError) {
         console.error("Error deleting from Cloudinary:", cloudinaryError);
@@ -356,21 +339,18 @@ export const deletePhoto = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      message: "Photo deleted successfully"
+      message: "Photo deleted successfully",
     });
   } catch (error) {
     console.error("Delete photo error:", error);
     res.status(500).json({
       success: false,
       message: "Error deleting photo",
-      error: error.message
+      error: error.message,
     });
   }
 };
 
-// @desc    Update photo details
-// @route   PUT /api/photos/:photoId
-// @access  Private
 export const updatePhoto = async (req, res) => {
   try {
     const { photoId } = req.params;
@@ -381,7 +361,7 @@ export const updatePhoto = async (req, res) => {
     if (!photosDoc) {
       return res.status(404).json({
         success: false,
-        message: "Photo not found"
+        message: "Photo not found",
       });
     }
 
@@ -389,7 +369,7 @@ export const updatePhoto = async (req, res) => {
     if (!photo) {
       return res.status(404).json({
         success: false,
-        message: "Photo not found"
+        message: "Photo not found",
       });
     }
 
@@ -410,21 +390,18 @@ export const updatePhoto = async (req, res) => {
     res.status(200).json({
       success: true,
       message: "Photo updated successfully",
-      data: photo
+      data: photo,
     });
   } catch (error) {
     console.error("Update photo error:", error);
     res.status(500).json({
       success: false,
       message: "Error updating photo",
-      error: error.message
+      error: error.message,
     });
   }
 };
 
-// @desc    Get photo statistics for a project
-// @route   GET /api/photos/project/:projectId/stats
-// @access  Private
 export const getPhotoStats = async (req, res) => {
   try {
     const { projectId } = req.params;
@@ -438,37 +415,37 @@ export const getPhotoStats = async (req, res) => {
           totalPhotos: 0,
           approvedPhotos: 0,
           pendingPhotos: 0,
-          recentUploads: []
-        }
+          recentUploads: [],
+        },
       });
     }
 
     const photos = photosDoc.photos;
     const stats = {
       totalPhotos: photos.length,
-      approvedPhotos: photos.filter(p => p.isApproved).length,
-      pendingPhotos: photos.filter(p => !p.isApproved).length,
+      approvedPhotos: photos.filter((p) => p.isApproved).length,
+      pendingPhotos: photos.filter((p) => !p.isApproved).length,
       recentUploads: photos
         .sort((a, b) => b.createdAt - a.createdAt)
         .slice(0, 5)
-        .map(p => ({
+        .map((p) => ({
           id: p._id,
           url: p.url,
           isApproved: p.isApproved,
-          uploadedAt: p.createdAt
-        }))
+          uploadedAt: p.createdAt,
+        })),
     };
 
     res.status(200).json({
       success: true,
-      data: stats
+      data: stats,
     });
   } catch (error) {
     console.error("Get photo stats error:", error);
     res.status(500).json({
       success: false,
       message: "Error fetching photo statistics",
-      error: error.message
+      error: error.message,
     });
   }
 };
