@@ -1,6 +1,7 @@
 import Project from "../models/Project.js";
 import User from "../models/User.js";
 import AttributeSet from "../models/AttributeSet.js";
+import { generateProjectProposalPDF } from "../helpers/pdfGenerator.js";
 import Attribute from "../models/Attribute.js";
 import mongoose from "mongoose";
 import {
@@ -1704,6 +1705,291 @@ export const getProjectTeamByProjectId = async (req, res) => {
     res.status(500).json({
       success: false,
       message: error.message,
+    });
+  }
+};
+
+export const downloadProjectProposal = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid project ID",
+      });
+    }
+
+    // Reuse the same aggregation pipeline from getProjectById
+    const projectId = new mongoose.Types.ObjectId(id);
+
+    const pipeline = [
+      { $match: { _id: projectId } },
+
+      // User lookups
+      {
+        $lookup: {
+          from: "users",
+          localField: "client",
+          foreignField: "_id",
+          as: "client",
+        },
+      },
+      { $unwind: { path: "$client", preserveNullAndEmptyArrays: true } },
+
+      {
+        $lookup: {
+          from: "users",
+          localField: "site_manager",
+          foreignField: "_id",
+          as: "site_manager",
+        },
+      },
+      { $unwind: { path: "$site_manager", preserveNullAndEmptyArrays: true } },
+
+      {
+        $lookup: {
+          from: "users",
+          localField: "labour",
+          foreignField: "_id",
+          as: "labour",
+        },
+      },
+
+      {
+        $lookup: {
+          from: "users",
+          localField: "createdBy",
+          foreignField: "_id",
+          as: "createdBy",
+        },
+      },
+      { $unwind: { path: "$createdBy", preserveNullAndEmptyArrays: true } },
+
+      // Attribute Sets lookup with populated attributes
+      {
+        $lookup: {
+          from: "attributesets",
+          localField: "AttributeSet", // Keep as uppercase to match DB
+          foreignField: "_id",
+          as: "attributeSets", // Rename to camelCase for JavaScript
+          pipeline: [
+            {
+              $lookup: {
+                from: "attributes",
+                localField: "attributes",
+                foreignField: "_id",
+                as: "populatedAttributes",
+              }
+            },
+            {
+              $addFields: {
+                attributes: "$populatedAttributes"
+              }
+            },
+            {
+              $project: {
+                populatedAttributes: 0
+              }
+            }
+          ]
+        },
+      },
+
+      // Direct attributes lookup with pricing
+      {
+        $lookup: {
+          from: "attributes",
+          localField: "attributes.attribute",
+          foreignField: "_id",
+          as: "directAttributeDetails",
+        },
+      },
+
+      // Create map for direct attributes with pricing
+      {
+        $addFields: {
+          directAttributeMap: {
+            $arrayToObject: {
+              $map: {
+                input: "$directAttributeDetails",
+                as: "attr",
+                in: {
+                  k: { $toString: "$$attr._id" },
+                  v: {
+                    _id: "$$attr._id",
+                    label: "$$attr.label",
+                    type: "$$attr.type",
+                    pricing: "$$attr.pricing",
+                    unit: "$$attr.unit"
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+
+      // Enrich direct attributes with details
+      {
+        $addFields: {
+          enrichedAttributes: {
+            $map: {
+              input: "$attributes",
+              as: "item",
+              in: {
+                attribute: {
+                  $mergeObjects: [
+                    { _id: "$$item.attribute" },
+                    {
+                      $getField: {
+                        field: { $toString: "$$item.attribute" },
+                        input: "$directAttributeMap",
+                      },
+                    },
+                  ],
+                },
+                quantity: "$$item.quantity",
+              },
+            },
+          },
+        },
+      },
+
+      // Calculate totals from attribute sets
+      {
+        $addFields: {
+          attributeSets: {
+            $map: {
+              input: "$attributeSets",
+              as: "set",
+              in: {
+                _id: "$$set._id",
+                name: "$$set.name",
+                attributes: "$$set.attributes",
+                createdBy: "$$set.createdBy",
+                createdAt: "$$set.createdAt",
+                updatedAt: "$$set.updatedAt",
+                setTotal: {
+                  $sum: {
+                    $map: {
+                      input: { $ifNull: ["$$set.attributes", []] },
+                      as: "attr",
+                      in: { $ifNull: ["$$attr.pricing", 0] },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+
+      // Calculate totals correctly
+      {
+        $addFields: {
+          // Total from attribute sets
+          attributeSetTotal: {
+            $sum: "$attributeSets.setTotal",
+          },
+          
+          // Total from direct attributes with quantities
+          directAttributesTotal: {
+            $sum: {
+              $map: {
+                input: "$enrichedAttributes",
+                as: "item",
+                in: {
+                  $multiply: [
+                    { $ifNull: ["$$item.quantity", 1] },
+                    { $ifNull: ["$$item.attribute.pricing", 0] }
+                  ]
+                }
+              }
+            }
+          },
+        },
+      },
+
+      {
+        $addFields: {
+          // Project total from attributes (sets + direct with quantities)
+          projectTotal: {
+            $add: [
+              { $ifNull: ["$attributeSetTotal", 0] },
+              { $ifNull: ["$directAttributesTotal", 0] },
+            ],
+          },
+          
+          // Final project total including extracost
+          finalProjectTotal: {
+            $add: [
+              { $ifNull: ["$attributeSetTotal", 0] },
+              { $ifNull: ["$directAttributesTotal", 0] },
+              { $ifNull: ["$extracost", 0] },
+            ],
+          },
+        },
+      },
+
+      // Replace attributes with enriched version
+      {
+        $addFields: {
+          attributes: "$enrichedAttributes"
+        }
+      },
+
+      // Clean up temporary fields
+      {
+        $project: {
+          directAttributeDetails: 0,
+          directAttributeMap: 0,
+          attributeSetTotal: 0,
+          directAttributesTotal: 0,
+          enrichedAttributes: 0,
+        },
+      },
+    ];
+
+    const [project] = await Project.aggregate(pipeline);
+
+    if (!project) {
+      return res.status(404).json({
+        success: false,
+        message: "Project not found",
+      });
+    }
+    // Log to verify data is loaded
+    console.log("Project loaded for PDF:", {
+      id: project._id,
+      name: project.projectName,
+      clientName: project.client?.name,
+      siteManagerName: project.site_manager?.name,
+      labourCount: project.labour?.length,
+      attributeSetCount: project.attributeSets?.length,
+      attributeCount: project.attributes?.length,
+      projectTotal: project.projectTotal,
+      finalProjectTotal: project.finalProjectTotal,
+    });
+
+    // Generate PDF
+    const pdfBuffer = await generateProjectProposalPDF(project);
+
+    // Set response headers for PDF download
+    const filename = `project_proposal_${project.projectName.replace(/\s+/g, '_')}_${Date.now()}.pdf`;
+    
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.setHeader("Content-Length", pdfBuffer.length);
+    
+    // Send PDF
+    res.send(pdfBuffer);
+  } catch (error) {
+    console.error("PDF Generation Error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to generate PDF proposal",
+      error: error.message,
     });
   }
 };

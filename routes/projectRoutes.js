@@ -11,6 +11,7 @@ import {
   removeProjectAttribute,
   updateAttributeQuantity,
   getProjectTeamByProjectId,
+  downloadProjectProposal,
 } from "../controllers/projectController.js";
 
 const router = express.Router();
@@ -33,5 +34,7 @@ router.delete(
   removeProjectAttribute,
 );
 router.get("/getProjectTeam/:projectId", getProjectTeamByProjectId);
+
+router.get("/downloadProjectProposal/:id/download", downloadProjectProposal);
 
 export default router;
