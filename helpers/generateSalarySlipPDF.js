@@ -305,16 +305,11 @@ export function generateSalarySlipPDF(payroll, res) {
   drawSectionHeader("DEDUCTIONS", C.red);
   drawTableHeader(C.redXl);
 
-  const deductionRows = [
-    ...(payroll.deductions || []).map((d) => [
-      `Deduction – ${(d.reason || "").replace(/_/g, " ")}${d.note ? ` (${d.note})` : ""}`,
-      d.amount,
-    ]),
-    ...(payroll.advanceRecovered > 0
-      ? [["Advance Recovery", payroll.advanceRecovered]]
-      : []),
-  ];
-
+const deductionRows = [
+  ...(payroll.advanceRecovered > 0
+    ? [["Advance Recovery", payroll.advanceRecovered]]
+    : []),
+];
   if (deductionRows.length === 0) {
     fillRect(M, curY, W, 20, C.white, C.border);
     doc
