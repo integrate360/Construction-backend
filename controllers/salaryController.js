@@ -274,13 +274,17 @@ export const generatePayroll = async (req, res) => {
     const exists = await Payroll.findOne({
       user,
       project,
-      periodStart,
-      periodEnd,
+      $or: [
+        {
+          periodStart: { $lte: new Date(periodEnd) },
+          periodEnd: { $gte: new Date(periodStart) },
+        },
+      ],
     });
     if (exists) {
       return res.status(400).json({
         success: false,
-        message: "Payroll already generated for this period",
+        message: `Payroll already exists for this period. Existing payroll ID: ${exists._id}`,
       });
     }
 
@@ -347,13 +351,11 @@ export const generatePayroll = async (req, res) => {
     // Salary available after other deductions
     const salaryBeforeAdvanceRecovery = grossSalary - totalDeductionsWithoutAdvance;
 
-    // ✅ Check if user manually sent advance_recovery in deductions
+    // Check if user manually sent advance_recovery in deductions
     const manualAdvanceRecovery = deductions
       .filter((d) => d.reason === "advance_recovery")
       .reduce((sum, d) => sum + (d.amount || 0), 0);
 
-    // ✅ Auto calculate advance recovery if not manually sent
-    // Auto recover = min(salaryBeforeAdvanceRecovery, totalPendingAdvanceBalance)
     let advanceRecoveryInThisPayroll = 0;
     let finalDeductions = [...deductionsWithoutAdvance];
 
@@ -374,23 +376,24 @@ export const generatePayroll = async (req, res) => {
       }
 
       advanceRecoveryInThisPayroll = manualAdvanceRecovery;
-      finalDeductions = [...deductionsWithoutAdvance, ...deductions.filter((d) => d.reason === "advance_recovery")];
-
+      finalDeductions = [
+        ...deductionsWithoutAdvance,
+        ...deductions.filter((d) => d.reason === "advance_recovery"),
+      ];
     } else if (totalPendingAdvanceBalance > 0) {
-      // ✅ Auto recover: take minimum of salary available vs pending balance
+      // Auto recover: take minimum of salary available vs pending balance
       advanceRecoveryInThisPayroll = Math.min(
         salaryBeforeAdvanceRecovery,
         totalPendingAdvanceBalance,
       );
 
       if (advanceRecoveryInThisPayroll > 0) {
-        // ✅ Auto add advance_recovery to deductions
         finalDeductions = [
           ...deductionsWithoutAdvance,
           {
             reason: "advance_recovery",
             amount: advanceRecoveryInThisPayroll,
-            note: "Auto recovered from pending advance",
+            // ✅ no note
           },
         ];
       }
@@ -421,7 +424,7 @@ export const generatePayroll = async (req, res) => {
       basicSalary,
       overtimePay,
       allowances,
-      deductions: finalDeductions, // ✅ includes auto advance_recovery
+      deductions: finalDeductions,
       totalAllowances,
       totalDeductions,
       grossSalary,
@@ -432,7 +435,7 @@ export const generatePayroll = async (req, res) => {
       createdBy: req.user.id,
     });
 
-    // ✅ Update Advance records FIFO
+    // Update Advance records FIFO (oldest first)
     if (advanceRecoveryInThisPayroll > 0) {
       let remainingToRecover = advanceRecoveryInThisPayroll;
 
