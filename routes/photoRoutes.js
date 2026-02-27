@@ -10,6 +10,7 @@ import {
   updatePhoto,
   getPhotoStats,
 } from "../controllers/photoController.js";
+
 import authMiddleware from "../middleware/authmiddleware.js";
 import {
   uploadMultiple,
@@ -18,30 +19,24 @@ import {
 
 const router = express.Router();
 
-// All routes are protected
 router.use(authMiddleware);
 
-// Photo statistics route
 router.get("/project/:projectId/stats", getPhotoStats);
 
-// Project photos routes
-router.route("/project/:projectId").get(getProjectPhotos);
+router.get("/project/:projectId", getProjectPhotos);
 
-// Upload multiple photos route
 router.post("/upload/:projectId", uploadMultiple, uploadPhotos);
 
-// Upload single photo route
-router.post("/upload-single/:projectId", uploadSingle, uploadSinglePhoto);
+router.post("/uploadSinglePhoto/upload-single/:projectId", uploadSingle, uploadSinglePhoto);
 
-// Single photo routes
-router
-  .route("/:photoId")
-  .get(getPhotoById)
-  .put(updatePhoto)
-  .delete(deletePhoto);
+router.get("/photo/:photoId", getPhotoById);
 
-// Approval routes
-router.put("/:photoId/approve", authMiddleware, approvePhoto);
-router.put("/:photoId/reject", authMiddleware, rejectPhoto);
+router.put("/updatePhoto/:photoId", updatePhoto);
+
+router.delete("/deletePhoto/:photoId", deletePhoto);
+
+router.put("/approvePhoto/:photoId/approve", approvePhoto);
+
+router.put("/rejectPhoto/:photoId/reject", rejectPhoto);
 
 export default router;
