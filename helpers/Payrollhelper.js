@@ -95,24 +95,18 @@ const calcPayroll = (
   }
 
   const overtimePay = (structure.overtimeRate || 0) * overtimeHours;
-  const totalAllowances = allowances.reduce(
-    (sum, a) => sum + (a.amount || 0),
-    0,
-  );
-  const totalDeductions = deductions.reduce(
-    (sum, d) => sum + (d.amount || 0),
-    0,
-  );
+  const totalAllowances = allowances.reduce((sum, a) => sum + (a.amount || 0), 0);
+  const totalDeductions = deductions.reduce((sum, d) => sum + (d.amount || 0), 0);
   const grossSalary = basicSalary + overtimePay + totalAllowances;
   const netSalary = Math.max(0, grossSalary - totalDeductions);
 
   return {
-    basicSalary,
-    overtimePay,
-    totalAllowances,
-    totalDeductions,
-    grossSalary,
-    netSalary,
+    basicSalary: parseFloat(basicSalary.toFixed(2)),         // ✅
+    overtimePay: parseFloat(overtimePay.toFixed(2)),         // ✅
+    totalAllowances: parseFloat(totalAllowances.toFixed(2)), // ✅
+    totalDeductions: parseFloat(totalDeductions.toFixed(2)), // ✅
+    grossSalary: parseFloat(grossSalary.toFixed(2)),         // ✅
+    netSalary: parseFloat(netSalary.toFixed(2)),             // ✅
   };
 };
 
