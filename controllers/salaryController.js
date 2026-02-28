@@ -275,6 +275,7 @@ export const generatePayroll = async (req, res) => {
         },
       ],
     });
+
     if (exists) {
       return res.status(400).json({
         success: false,
@@ -288,6 +289,7 @@ export const generatePayroll = async (req, res) => {
       project,
       isActive: true,
     });
+
     if (!structure) {
       return res.status(404).json({
         success: false,
@@ -305,23 +307,20 @@ export const generatePayroll = async (req, res) => {
       attendanceRecords,
     } = await getAttendanceSummary(user, project, periodStart, periodEnd);
 
-    // Get pending advances
+    // ✅ FIXED: Get advances that still have remaining balance
     const pendingAdvances = await Advance.find({
       user,
       project,
-      recoveryStatus: { $ne: "recovered" },
-    }).populate("createdBy", "name");
+      $expr: { $gt: ["$amount", "$amountRecovered"] },
+    }).sort({ givenDate: 1 });
 
-    const totalAdvancePaid = pendingAdvances.reduce(
-      (sum, a) => sum + a.amount,
-      0,
-    );
-
-    // Total remaining advance balance
+    // ✅ FIXED: Remaining balance only
     const totalPendingAdvanceBalance = pendingAdvances.reduce(
       (sum, a) => sum + (a.amount - a.amountRecovered),
       0,
     );
+
+    const totalAdvancePaid = totalPendingAdvanceBalance;
 
     // Calculate gross WITHOUT advance_recovery deduction
     const deductionsWithoutAdvance = deductions.filter(
@@ -343,11 +342,9 @@ export const generatePayroll = async (req, res) => {
       totalHoursWorked,
     );
 
-    // Salary available after other deductions
     const salaryBeforeAdvanceRecovery =
       grossSalary - totalDeductionsWithoutAdvance;
 
-    // Check if user manually sent advance_recovery in deductions
     const manualAdvanceRecovery = deductions
       .filter((d) => d.reason === "advance_recovery")
       .reduce((sum, d) => sum + (d.amount || 0), 0);
@@ -356,7 +353,7 @@ export const generatePayroll = async (req, res) => {
     let finalDeductions = [...deductionsWithoutAdvance];
 
     if (manualAdvanceRecovery > 0) {
-      // ✅ Validate manual recovery cannot exceed net earnings
+      // Validate net salary
       if (manualAdvanceRecovery > salaryBeforeAdvanceRecovery) {
         return res.status(400).json({
           success: false,
@@ -364,7 +361,7 @@ export const generatePayroll = async (req, res) => {
         });
       }
 
-      // ✅ Validate manual recovery cannot exceed remaining advance balance
+      // ✅ Validate remaining advance balance
       if (manualAdvanceRecovery > totalPendingAdvanceBalance) {
         return res.status(400).json({
           success: false,
@@ -373,14 +370,14 @@ export const generatePayroll = async (req, res) => {
       }
 
       advanceRecoveryInThisPayroll = manualAdvanceRecovery;
+
       finalDeductions = [
         ...deductionsWithoutAdvance,
         ...deductions.filter((d) => d.reason === "advance_recovery"),
       ];
     }
-    // ✅ No auto recovery — deductions stay as is if no advance_recovery sent
 
-    // Final payroll calculation with all deductions
+    // Final payroll calculation
     const { totalDeductions, netSalary } = calcPayroll(
       structure,
       presentDays,
@@ -416,34 +413,35 @@ export const generatePayroll = async (req, res) => {
       createdBy: req.user.id,
     });
 
-    // Update Advance records FIFO (oldest first) only if manual recovery sent
+    // ✅ FIFO Recovery (Fixed to always use remaining balance)
     if (advanceRecoveryInThisPayroll > 0) {
       let remainingToRecover = advanceRecoveryInThisPayroll;
 
-      const advancesToRecover = await Advance.find({
-        user,
-        project,
-        recoveryStatus: { $ne: "recovered" },
-      }).sort({ givenDate: 1 });
-
-      for (const advance of advancesToRecover) {
+      for (const advance of pendingAdvances) {
         if (remainingToRecover <= 0) break;
 
-        const advanceRemaining = advance.amount - advance.amountRecovered;
-        const recoverNow = Math.min(advanceRemaining, remainingToRecover);
+        const advanceRemaining =
+          advance.amount - advance.amountRecovered;
+
+        const recoverNow = Math.min(
+          advanceRemaining,
+          remainingToRecover
+        );
 
         advance.amountRecovered += recoverNow;
+
         advance.recoveryStatus =
           advance.amountRecovered >= advance.amount
             ? "recovered"
             : "partially_recovered";
 
         await advance.save();
+
         remainingToRecover -= recoverNow;
       }
     }
 
-    // Populate the created payroll
+    // Populate response
     const populatedPayroll = await Payroll.findById(payroll._id)
       .populate({
         path: "user",
