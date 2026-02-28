@@ -6,20 +6,14 @@ import projectModel from "../models/Project.js";
 
 export const createSalaryStructure = async (req, res) => {
   try {
-    const {
-      user,
-      project,
-      role,
-      salaryType,
-      rateAmount,
-      overtimeRate,
-    } = req.body;
+    const { user, project, role, salaryType, rateAmount, overtimeRate } =
+      req.body;
 
     // Deactivate existing active structures
-await SalaryStructure.updateMany(
-  { user, project, isActive: true },
-  { $set: { isActive: false } }
-);
+    await SalaryStructure.updateMany(
+      { user, project, isActive: true },
+      { $set: { isActive: false } },
+    );
 
     const structure = await SalaryStructure.create({
       user,
@@ -420,13 +414,9 @@ export const generatePayroll = async (req, res) => {
       for (const advance of pendingAdvances) {
         if (remainingToRecover <= 0) break;
 
-        const advanceRemaining =
-          advance.amount - advance.amountRecovered;
+        const advanceRemaining = advance.amount - advance.amountRecovered;
 
-        const recoverNow = Math.min(
-          advanceRemaining,
-          remainingToRecover
-        );
+        const recoverNow = Math.min(advanceRemaining, remainingToRecover);
 
         advance.amountRecovered += recoverNow;
 
@@ -705,8 +695,7 @@ export const getPayrollById = async (req, res) => {
       })
       .populate({
         path: "salaryStructure",
-        select:
-          "salaryType rateAmount overtimeRate   createdBy",
+        select: "salaryType rateAmount overtimeRate   createdBy",
         populate: {
           path: "createdBy",
           select: "name email",
@@ -1518,6 +1507,102 @@ export const getProjectUsers = async (req, res) => {
   }
 };
 
+export const previewSalary = async (req, res) => {
+  try {
+    const user = req.user.id;
+
+    // ========== AUTO DETECT PROJECT ==========
+    const structure = await SalaryStructure.findOne({
+      user,
+      isActive: true,
+    }).sort({ createdAt: -1 });
+
+    if (!structure) {
+      return res.status(404).json({
+        success: false,
+        message: "No active salary structure found for this user.",
+      });
+    }
+
+    const project = structure.project;
+
+    // ========== AUTO DETECT CURRENT MONTH RANGE ==========
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth(); // 0 = Jan
+    const periodStart = new Date(year, month, 1); // 1st of month
+    const periodEnd = new Date(); // today
+
+    // ========== ATTENDANCE SUMMARY ==========
+    const {
+      presentDays,
+      absentDays,
+      totalWorkingDays,
+      totalHoursWorked,
+      attendanceRecords,
+    } = await getAttendanceSummary(user, project, periodStart, periodEnd);
+
+    let payrollCalc;
+
+    // ========== KEY FIX: MONTHLY SALARY ALWAYS FULL ==========
+    if (structure.salaryType === "monthly") {
+      payrollCalc = {
+        basicSalary: parseFloat(structure.rateAmount.toFixed(2)),
+        overtimePay: 0,
+        totalAllowances: 0,
+        totalDeductions: 0,
+        grossSalary: parseFloat(structure.rateAmount.toFixed(2)),
+        netSalary: parseFloat(structure.rateAmount.toFixed(2)),
+      };
+    } else {
+      // daily / hourly → calculate normally
+      payrollCalc = calcPayroll(
+        structure,
+        presentDays,
+        0, // overtime auto 0
+        [], // allowances
+        [], // deductions
+        totalHoursWorked,
+      );
+    }
+
+    // ========== PENDING ADVANCE PREVIEW ==========
+    const pendingAdvances = await Advance.find({
+      user,
+      project,
+      $expr: { $gt: ["$amount", "$amountRecovered"] },
+    });
+
+    const totalPendingAdvanceBalance = pendingAdvances.reduce(
+      (sum, a) => sum + (a.amount - a.amountRecovered),
+      0,
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Monthly salary preview generated successfully",
+      preview: {
+        user,
+        project,
+        periodStart,
+        periodEnd,
+        presentDays,
+        absentDays,
+        totalWorkingDays,
+        totalHoursWorked,
+        ...payrollCalc,
+        pendingAdvanceBalance: totalPendingAdvanceBalance,
+        attendanceRecords,
+      },
+    });
+  } catch (error) {
+    return res.status(400).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
 export const getMyPayrolls = async (req, res) => {
   try {
     const {
@@ -1539,7 +1624,7 @@ export const getMyPayrolls = async (req, res) => {
 
     // Base filter for the logged-in user
     const filter = { user: userId };
-    
+
     // Add optional filters
     if (project) filter.project = project;
     if (role) filter.role = role;
@@ -1598,7 +1683,8 @@ export const getMyPayrolls = async (req, res) => {
       totalNetSalary: payrolls.reduce((sum, p) => sum + p.netSalary, 0),
       totalGrossSalary: payrolls.reduce((sum, p) => sum + p.grossSalary, 0),
       totalPaid: payrolls.filter((p) => p.paymentStatus === "paid").length,
-      totalPending: payrolls.filter((p) => p.paymentStatus === "pending").length,
+      totalPending: payrolls.filter((p) => p.paymentStatus === "pending")
+        .length,
       totalPartiallyPaid: payrolls.filter(
         (p) => p.paymentStatus === "partially_paid",
       ).length,
