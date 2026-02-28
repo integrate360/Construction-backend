@@ -4,6 +4,7 @@ import cors from "cors";
 import morgan from "morgan";
 import swaggerUI from "./swagger/swaggerUI.js";
 import connectDB from "./config/db.js";
+import { scheduleAutoCarryForward } from "./controllers/taskController.js";
 import authRoutes from "./routes/authRoutes.js";
 import attributeRoutes from "./routes/attributeRoutes.js";
 import attributeSetRoutes from "./routes/attributeSetRoutes.js";
@@ -13,6 +14,7 @@ import attendanceRoutes from "./routes/attendanceRoutes.js";
 import SalaryRoutes from "./routes/SalaryRoutes.js";
 import photoRoutes from "./routes/photoRoutes.js";
 import labourVoucherRoutes from "./routes/labourVoucherRoutes.js"
+import taskRoutes from "./routes/taskRoutes.js"
 
 dotenv.config({ quiet: true });
 
@@ -47,6 +49,7 @@ app.use("/api/attendance", attendanceRoutes);
 app.use("/api/salary", SalaryRoutes);
 app.use("/api/photos", photoRoutes);
 app.use("/api/voucher", labourVoucherRoutes);
+app.use ("/api/tasks",taskRoutes)
 
 // 404 Handler
 app.use((req, res) => {
@@ -81,6 +84,7 @@ const startServer = async () => {
     process.exit(1);
   }
 };
+scheduleAutoCarryForward();
 
 startServer();
 
