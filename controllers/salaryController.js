@@ -13,15 +13,13 @@ export const createSalaryStructure = async (req, res) => {
       salaryType,
       rateAmount,
       overtimeRate,
-      effectiveFrom,
-      effectiveTo,
     } = req.body;
 
     // Deactivate existing active structures
-    await SalaryStructure.updateMany(
-      { user, project, isActive: true },
-      { isActive: false, effectiveTo: new Date() },
-    );
+await SalaryStructure.updateMany(
+  { user, project, isActive: true },
+  { $set: { isActive: false } }
+);
 
     const structure = await SalaryStructure.create({
       user,
@@ -30,8 +28,6 @@ export const createSalaryStructure = async (req, res) => {
       salaryType,
       rateAmount,
       overtimeRate,
-      effectiveFrom: effectiveFrom || new Date(),
-      effectiveTo,
       createdBy: req.user.id,
     });
 
@@ -200,11 +196,7 @@ export const updateSalaryStructure = async (req, res) => {
 
 export const deleteSalaryStructure = async (req, res) => {
   try {
-    const structure = await SalaryStructure.findByIdAndUpdate(
-      req.params.id,
-      { isActive: false, effectiveTo: new Date() },
-      { new: true },
-    );
+    const structure = await SalaryStructure.findByIdAndDelete(req.params.id);
 
     if (!structure) {
       return res.status(404).json({
@@ -215,11 +207,13 @@ export const deleteSalaryStructure = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      message: "Salary structure deactivated successfully",
-      data: structure,
+      message: "Salary structure deleted successfully",
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
   }
 };
 
@@ -297,7 +291,8 @@ export const generatePayroll = async (req, res) => {
     if (!structure) {
       return res.status(404).json({
         success: false,
-        message: "No active salary structure found for this user on this project",
+        message:
+          "No active salary structure found for this user on this project",
       });
     }
 
@@ -349,7 +344,8 @@ export const generatePayroll = async (req, res) => {
     );
 
     // Salary available after other deductions
-    const salaryBeforeAdvanceRecovery = grossSalary - totalDeductionsWithoutAdvance;
+    const salaryBeforeAdvanceRecovery =
+      grossSalary - totalDeductionsWithoutAdvance;
 
     // Check if user manually sent advance_recovery in deductions
     const manualAdvanceRecovery = deductions
@@ -463,7 +459,7 @@ export const generatePayroll = async (req, res) => {
       })
       .populate({
         path: "salaryStructure",
-        select: "salaryType rateAmount overtimeRate effectiveFrom",
+        select: "salaryType rateAmount overtimeRate",
       })
       .populate("createdBy", "name email role profilePicture");
 
@@ -652,7 +648,7 @@ export const getAllPayrolls = async (req, res) => {
       })
       .populate({
         path: "salaryStructure",
-        select: "salaryType rateAmount overtimeRate effectiveFrom",
+        select: "salaryType rateAmount overtimeRate",
       })
       .populate("createdBy", "name email role")
       .sort(sortOptions)
@@ -712,7 +708,7 @@ export const getPayrollById = async (req, res) => {
       .populate({
         path: "salaryStructure",
         select:
-          "salaryType rateAmount overtimeRate effectiveFrom effectiveTo createdBy",
+          "salaryType rateAmount overtimeRate   createdBy",
         populate: {
           path: "createdBy",
           select: "name email",
@@ -1438,7 +1434,7 @@ export const downloadSalarySlip = async (req, res) => {
       })
       .populate({
         path: "salaryStructure",
-        select: "salaryType rateAmount overtimeRate effectiveFrom",
+        select: "salaryType rateAmount overtimeRate ",
       })
       .populate("createdBy", "name email role");
 

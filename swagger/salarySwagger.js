@@ -94,13 +94,8 @@
  *           minimum: 0
  *           example: 100
  *           description: Extra pay per hour for overtime
- *         effectiveFrom:
- *           type: string
- *           format: date-time
- *         effectiveTo:
- *           type: string
- *           format: date-time
- *           nullable: true
+ *        
+ *     
  *         isActive:
  *           type: boolean
  *           default: true
@@ -149,12 +144,6 @@
  *           type: number
  *           minimum: 0
  *           example: 100
- *         effectiveFrom:
- *           type: string
- *           format: date-time
- *         effectiveTo:
- *           type: string
- *           format: date-time
  *
  *     AllowanceReason:
  *       type: string

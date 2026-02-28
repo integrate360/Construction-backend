@@ -33,14 +33,6 @@ const salaryStructureSchema = new mongoose.Schema(
       min: 0,
       description: "Extra pay per hour for overtime",
     },
-    effectiveFrom: {
-      type: Date,
-      required: true,
-      default: Date.now,
-    },
-    effectiveTo: {
-      type: Date,
-    },
     isActive: {
       type: Boolean,
       default: true,
