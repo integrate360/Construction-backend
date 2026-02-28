@@ -318,7 +318,7 @@ export const updateTask = async (req, res) => {
 
 export const completeTask = async (req, res) => {
   try {
-    const { notes } = req.body;
+    const notes = req.body?.notes || null;
 
     const task = await Task.findById(req.params.id);
 
@@ -329,25 +329,6 @@ export const completeTask = async (req, res) => {
       });
     }
 
-    // Check if user is authorized to complete this task
-    const isAssignedLabour = task.assignedTo.includes(req.user.id);
-    const isSuperAdmin = req.user.role === "super_admin";
-    const isSiteManager = req.user.role === "site_manager";
-
-    // Check if site manager manages this project
-    let isAuthorizedSiteManager = false;
-    if (isSiteManager) {
-      const project = await Project.findById(task.project);
-      isAuthorizedSiteManager = project.site_manager.toString() === req.user.id;
-    }
-
-    if (!isAssignedLabour && !isSuperAdmin && !isAuthorizedSiteManager) {
-      return res.status(403).json({
-        success: false,
-        message: "You are not authorized to complete this task",
-      });
-    }
-
     if (task.status === "completed") {
       return res.status(400).json({
         success: false,
@@ -355,9 +336,14 @@ export const completeTask = async (req, res) => {
       });
     }
 
-    await task.markAsCompleted(notes, req.user.id);
+    // Mark task as completed (notes optional)
+    if (notes) {
+      await task.markAsCompleted(notes);
+    } else {
+      await task.markAsCompleted();
+    }
 
-    // Update daily summary for each assigned labour
+    // Update daily summary
     const completionDate = new Date();
     completionDate.setHours(0, 0, 0, 0);
 
@@ -369,10 +355,11 @@ export const completeTask = async (req, res) => {
       });
 
       if (dailySummary) {
-        await dailySummary.addCompletedTask(task._id);
+        dailySummary.totalTasksCompleted += 1;
+        dailySummary.completedTaskIds.push(task._id);
+        await dailySummary.save();
       } else {
-        // Create summary if it doesn't exist
-        dailySummary = await DailyTaskSummary.create({
+        await DailyTaskSummary.create({
           labour: labourId,
           project: task.project,
           date: completionDate,
@@ -388,6 +375,7 @@ export const completeTask = async (req, res) => {
       message: "Task marked as completed",
       data: task,
     });
+
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -396,79 +384,7 @@ export const completeTask = async (req, res) => {
   }
 };
 
-export const carryForwardTasks = async (req, res) => {
-  try {
-    const { project, date, newDueDate } = req.body;
 
-    const targetDate = date ? new Date(date) : new Date();
-    targetDate.setHours(0, 0, 0, 0);
-
-    // Find all pending tasks for the specified date
-    const pendingTasks = await Task.find({
-      project,
-      status: { $in: ["pending", "in_progress", "overdue"] },
-      dueDate: {
-        $gte: targetDate,
-        $lt: new Date(targetDate.getTime() + 24 * 60 * 60 * 1000),
-      },
-    });
-
-    const carriedTasks = [];
-
-    // Carry forward each pending task
-    for (const task of pendingTasks) {
-      const carriedTask = await task.carryForward(
-        newDueDate || new Date(targetDate.getTime() + 24 * 60 * 60 * 1000),
-        task.priority,
-      );
-      carriedTasks.push(carriedTask);
-    }
-
-    // Update daily summary for carried forward tasks
-    const labourGroups = {};
-    pendingTasks.forEach((task) => {
-      task.assignedTo.forEach((labourId) => {
-        if (!labourGroups[labourId]) {
-          labourGroups[labourId] = {
-            tasks: [],
-            labourId,
-            project: task.project,
-          };
-        }
-        labourGroups[labourId].tasks.push(task);
-      });
-    });
-
-    for (const group of Object.values(labourGroups)) {
-      let dailySummary = await DailyTaskSummary.findOne({
-        labour: group.labourId,
-        project: group.project,
-        date: targetDate,
-      });
-
-      if (dailySummary) {
-        dailySummary.tasksCarriedForward += group.tasks.length;
-        dailySummary.carriedForwardTaskIds.push(
-          ...group.tasks.map((t) => t._id),
-        );
-        dailySummary.totalTasksOverdue += group.tasks.length;
-        dailySummary.overdueTaskIds.push(...group.tasks.map((t) => t._id));
-        await dailySummary.save();
-      }
-    }
-
-    res.status(200).json({
-      success: true,
-      message: `${carriedTasks.length} tasks carried forward successfully`,
-      data: carriedTasks,
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
-  }
-};
 
 export const getLabourTaskSummary = async (req, res) => {
   try {

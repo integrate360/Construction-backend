@@ -30,8 +30,6 @@ router.put("/tasks/:id", updateTask);
 
 router.put("/tasks/:id/complete", completeTask);
 
-router.post("/tasks/carry-forward", carryForwardTasks);
-
 router.get("/tasks/summary/labour/:labourId", getLabourTaskSummary);
 
 router.get("/tasks/dashboard/project/:projectId", getProjectTaskDashboard);
