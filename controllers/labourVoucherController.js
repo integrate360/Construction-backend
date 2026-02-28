@@ -1,18 +1,12 @@
-import  LabourVoucher  from "../models/LabourVoucher.js";
+import LabourVoucher from "../models/LabourVoucher.js";
 import Project from "../models/Project.js";
 import User from "../models/User.js";
 import mongoose from "mongoose";
 
 export const createLabourVoucher = async (req, res) => {
   try {
-    const {
-      project,
-      paidAmount,
-      paymentMode,
-      paymentDate,
-      remarks,
-      user,
-    } = req.body;
+    const { project, paidAmount, paymentMode, paymentDate, remarks, user } =
+      req.body;
 
     const projectExists = await Project.findById(project);
     if (!projectExists) {
@@ -46,7 +40,6 @@ export const createLabourVoucher = async (req, res) => {
         message: "Selected user is not a labour",
       });
     }
-
 
     const labourVoucher = await LabourVoucher.create({
       user: labourUser._id,
@@ -591,4 +584,3 @@ export const getVouchersByUser = async (req, res) => {
     });
   }
 };
-
