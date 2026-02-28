@@ -24,6 +24,7 @@ import {
   getProjectAdvanceSummary,
   downloadSalarySlip,
   getProjectUsers,
+  previewSalary,
 } from "../controllers/salaryController.js";
 import authMiddleware from "../middleware/authmiddleware.js";
 
@@ -31,6 +32,7 @@ const router = express.Router();
 router.use(authMiddleware);
 
 router.get("/structure", getAllSalaryStructures);
+router.get("/my/salary", previewSalary);
 
 router.post("/structure", createSalaryStructure);
 
