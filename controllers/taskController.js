@@ -628,6 +628,14 @@ export const triggerAutoCarryForward = async (req, res) => {
 };
 
 
+// Priority order map
+const priorityOrder = {
+  critical: 1,
+  high: 2,
+  medium: 3,
+  low: 4,
+};
+
 export const getMyTasks = async (req, res) => {
   try {
     const {
@@ -638,152 +646,57 @@ export const getMyTasks = async (req, res) => {
       toDate,
       page = 1,
       limit = 10,
-      sortBy = 'dueDate',
-      sortOrder = 'asc'
+      sortBy,
+      sortOrder = "asc",
     } = req.query;
 
     const query = {
-      assignedTo: req.user.id, // Filter tasks assigned to current user
-      isActive: true
+      assignedTo: req.user.id,
+      isActive: true,
     };
 
-    // Apply optional filters
     if (status) query.status = status;
     if (priority) query.priority = priority;
     if (project) query.project = project;
 
-    // Date range filter
     if (fromDate || toDate) {
       query.dueDate = {};
       if (fromDate) query.dueDate.$gte = new Date(fromDate);
       if (toDate) query.dueDate.$lte = new Date(toDate);
     }
 
-    // Build sort object
-    const sort = {};
-    sort[sortBy] = sortOrder === 'desc' ? -1 : 1;
-
-    // Pagination
-    const skip = (parseInt(page) - 1) * parseInt(limit);
-
-    // Get tasks
-    const tasks = await Task.find(query)
+    // Fetch all tasks
+    let allTasks = await Task.find(query)
       .populate("project", "projectName siteName location")
       .populate("assignedBy", "name email role")
-      .populate("originalTask", "title status")
-      .sort(sort)
-      .skip(skip)
-      .limit(parseInt(limit));
+      .lean();
 
-    // Get total count for pagination
-    const total = await Task.countDocuments(query);
+    // 🔥 SORT ONLY BY PRIORITY — NOTHING ELSE
+    allTasks.sort((a, b) => {
+      const pa = priorityOrder[a.priority] || 99;
+      const pb = priorityOrder[b.priority] || 99;
 
-    // Get statistics for the user
-    const statistics = await Task.aggregate([
-      {
-        $match: {
-          assignedTo: req.user.id,
-          isActive: true
-        }
-      },
-      {
-        $group: {
-          _id: "$status",
-          count: { $sum: 1 }
-        }
-      }
-    ]);
-
-    // Format statistics
-    const stats = {
-      total: total,
-      pending: 0,
-      in_progress: 0,
-      completed: 0,
-      carried_forward: 0,
-      overdue: 0
-    };
-
-    statistics.forEach(stat => {
-      stats[stat._id] = stat.count;
+      return pa - pb; // ONLY PRIORITY
     });
 
-    // Get today's tasks
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-
-    const todayTasks = await Task.find({
-      assignedTo: req.user.id,
-      dueDate: {
-        $gte: today,
-        $lt: tomorrow
-      },
-      isActive: true,
-      status: { $ne: 'completed' }
-    })
-    .populate("project", "projectName")
-    .sort({ priority: -1, dueDate: 1 });
-
-    // Get upcoming tasks (next 7 days)
-    const nextWeek = new Date(today);
-    nextWeek.setDate(nextWeek.getDate() + 7);
-
-    const upcomingTasks = await Task.find({
-      assignedTo: req.user.id,
-      dueDate: {
-        $gt: tomorrow,
-        $lte: nextWeek
-      },
-      isActive: true,
-      status: { $ne: 'completed' }
-    })
-    .populate("project", "projectName")
-    .sort({ dueDate: 1 })
-    .limit(5);
-
-    // Get overdue tasks
-    const overdueTasks = await Task.find({
-      assignedTo: req.user.id,
-      dueDate: { $lt: today },
-      status: { $in: ['pending', 'in_progress', 'overdue'] },
-      isActive: true
-    })
-    .populate("project", "projectName")
-    .sort({ dueDate: 1 });
+    // Pagination AFTER sorting
+    const total = allTasks.length;
+    const start = (page - 1) * limit;
+    const end = start + parseInt(limit);
+    const tasks = allTasks.slice(start, end);
 
     res.status(200).json({
       success: true,
-      data: {
-        tasks,
-        statistics: stats,
-        todayTasks: {
-          count: todayTasks.length,
-          tasks: todayTasks
-        },
-        upcomingTasks: {
-          count: upcomingTasks.length,
-          tasks: upcomingTasks
-        },
-        overdueTasks: {
-          count: overdueTasks.length,
-          tasks: overdueTasks
-        }
-      },
+      data: { tasks },
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
         total,
-        pages: Math.ceil(total / parseInt(limit)),
+        pages: Math.ceil(total / limit),
       },
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
