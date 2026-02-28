@@ -9,6 +9,7 @@ import {
   getProjectTaskDashboard,
   triggerAutoCarryForward,
   getMyTasks,
+  deleteTaskPermanently,
 } from "../controllers/taskController.js";
 import authMiddleware from "../middleware/authmiddleware.js";
 
@@ -34,5 +35,7 @@ router.get("/tasks/summary/labour/:labourId", getLabourTaskSummary);
 router.get("/tasks/dashboard/project/:projectId", getProjectTaskDashboard);
 
 router.post("/tasks/auto-carry-forward", triggerAutoCarryForward);
+
+router.post("/delete/:id", deleteTaskPermanently);
 
 export default router;

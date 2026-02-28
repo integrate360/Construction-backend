@@ -375,6 +375,7 @@ export const completeTask = async (req, res) => {
       message: "Task marked as completed",
       data: task,
     });
+
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -626,6 +627,7 @@ export const triggerAutoCarryForward = async (req, res) => {
   }
 };
 
+
 export const getMyTasks = async (req, res) => {
   try {
     const {
@@ -636,199 +638,139 @@ export const getMyTasks = async (req, res) => {
       toDate,
       page = 1,
       limit = 10,
-      sortBy,
-      sortOrder = "asc",
+      sortBy = 'dueDate',
+      sortOrder = 'asc'
     } = req.query;
 
     const query = {
-      assignedTo: req.user.id,
-      isActive: true,
+      assignedTo: req.user.id, // Filter tasks assigned to current user
+      isActive: true
     };
 
-    // Filters
+    // Apply optional filters
     if (status) query.status = status;
     if (priority) query.priority = priority;
     if (project) query.project = project;
 
-    // Date filters
+    // Date range filter
     if (fromDate || toDate) {
       query.dueDate = {};
       if (fromDate) query.dueDate.$gte = new Date(fromDate);
       if (toDate) query.dueDate.$lte = new Date(toDate);
     }
 
-    // If user manually sends sortBy → normal sorting
+    // Build sort object
     const sort = {};
-    if (sortBy) {
-      sort[sortBy] = sortOrder === "desc" ? -1 : 1;
-    }
+    sort[sortBy] = sortOrder === 'desc' ? -1 : 1;
 
+    // Pagination
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    // Fetch tasks
-    let tasks = await Task.find(query)
+    // Get tasks
+    const tasks = await Task.find(query)
       .populate("project", "projectName siteName location")
       .populate("assignedBy", "name email role")
       .populate("originalTask", "title status")
-      .sort(sortBy ? sort : {}) // only apply DB sort if sortBy exists
+      .sort(sort)
       .skip(skip)
-      .limit(parseInt(limit))
-      .lean();
+      .limit(parseInt(limit));
 
-    // ----------------------------------------------------------
-    // ✅ DEFAULT SORTING (When sortBy is NOT passed)
-    // STATUS ➜ PRIORITY ➜ DUEDATE
-    // ----------------------------------------------------------
-    if (!sortBy) {
-      const statusOrder = {
-        pending: 1,
-        in_progress: 2,
-        carried_forward: 3,
-        overdue: 4,
-        completed: 5,
-      };
-
-      const priorityOrder = {
-        critical: 1,
-        high: 2,
-        medium: 3,
-        low: 4,
-      };
-
-      tasks.sort((a, b) => {
-        // 1) Sort by status
-        const aStatus = statusOrder[a.status] || 99;
-        const bStatus = statusOrder[b.status] || 99;
-
-        if (aStatus !== bStatus) return aStatus - bStatus;
-
-        // 2) Same status → sort by priority
-        const aPriority = priorityOrder[a.priority] || 99;
-        const bPriority = priorityOrder[b.priority] || 99;
-
-        if (aPriority !== bPriority) return aPriority - bPriority;
-
-        // 3) Same priority → sort by dueDate
-        return new Date(a.dueDate) - new Date(b.dueDate);
-      });
-    }
-
-    // Count total
+    // Get total count for pagination
     const total = await Task.countDocuments(query);
 
-    // Statistics
+    // Get statistics for the user
     const statistics = await Task.aggregate([
-      { $match: { assignedTo: req.user.id, isActive: true } },
-      { $group: { _id: "$status", count: { $sum: 1 } } },
+      {
+        $match: {
+          assignedTo: req.user.id,
+          isActive: true
+        }
+      },
+      {
+        $group: {
+          _id: "$status",
+          count: { $sum: 1 }
+        }
+      }
     ]);
 
+    // Format statistics
     const stats = {
-      total,
+      total: total,
       pending: 0,
       in_progress: 0,
       completed: 0,
       carried_forward: 0,
-      overdue: 0,
+      overdue: 0
     };
 
-    statistics.forEach((s) => {
-      if (s._id === "pending") stats.pending = s.count;
-      if (s._id === "in_progress") stats.in_progress = s.count;
-      if (s._id === "completed") stats.completed = s.count;
-      if (s._id === "carried_forward") stats.carried_forward = s.count;
+    statistics.forEach(stat => {
+      stats[stat._id] = stat.count;
     });
 
-    // TODAY BOUNDARIES
+    // Get today's tasks
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-
+    
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
 
-    // TODAY TASKS
-    const todayTasksData = await Task.find({
+    const todayTasks = await Task.find({
       assignedTo: req.user.id,
-      dueDate: { $gte: today, $lt: tomorrow },
+      dueDate: {
+        $gte: today,
+        $lt: tomorrow
+      },
       isActive: true,
-      status: { $ne: "completed" },
+      status: { $ne: 'completed' }
     })
-      .populate("project", "projectName")
-      .lean();
+    .populate("project", "projectName")
+    .sort({ priority: -1, dueDate: 1 });
 
-    const priorityOrder = { critical: 1, high: 2, medium: 3, low: 4 };
-
-    todayTasksData.sort((a, b) => {
-      const pa = priorityOrder[a.priority] || 99;
-      const pb = priorityOrder[b.priority] || 99;
-
-      if (pa !== pb) return pa - pb;
-      return new Date(a.dueDate) - new Date(b.dueDate);
-    });
-
-    // UPCOMING TASKS
+    // Get upcoming tasks (next 7 days)
     const nextWeek = new Date(today);
     nextWeek.setDate(nextWeek.getDate() + 7);
 
-    const upcomingTasksData = await Task.find({
+    const upcomingTasks = await Task.find({
       assignedTo: req.user.id,
-      dueDate: { $gt: tomorrow, $lte: nextWeek },
+      dueDate: {
+        $gt: tomorrow,
+        $lte: nextWeek
+      },
       isActive: true,
-      status: { $ne: "completed" },
+      status: { $ne: 'completed' }
     })
-      .populate("project", "projectName")
-      .lean();
+    .populate("project", "projectName")
+    .sort({ dueDate: 1 })
+    .limit(5);
 
-    upcomingTasksData.sort((a, b) => {
-      const dateCompare = new Date(a.dueDate) - new Date(b.dueDate);
-      if (dateCompare !== 0) return dateCompare;
-
-      const pa = priorityOrder[a.priority] || 99;
-      const pb = priorityOrder[b.priority] || 99;
-      return pa - pb;
-    });
-
-    const limitedUpcomingTasks = upcomingTasksData.slice(0, 5);
-
-    // OVERDUE TASKS
-    const overdueTasksData = await Task.find({
+    // Get overdue tasks
+    const overdueTasks = await Task.find({
       assignedTo: req.user.id,
       dueDate: { $lt: today },
-      status: { $nin: ["completed"] },
-      isActive: true,
+      status: { $in: ['pending', 'in_progress', 'overdue'] },
+      isActive: true
     })
-      .populate("project", "projectName")
-      .lean();
+    .populate("project", "projectName")
+    .sort({ dueDate: 1 });
 
-    overdueTasksData.sort((a, b) => {
-      const dateCompare = new Date(a.dueDate) - new Date(b.dueDate);
-      if (dateCompare !== 0) return dateCompare;
-
-      const pa = priorityOrder[a.priority] || 99;
-      const pb = priorityOrder[b.priority] || 99;
-
-      return pa - pb;
-    });
-
-    stats.overdue = overdueTasksData.length;
-
-    // FINAL RESPONSE
     res.status(200).json({
       success: true,
       data: {
         tasks,
         statistics: stats,
         todayTasks: {
-          count: todayTasksData.length,
-          tasks: todayTasksData,
+          count: todayTasks.length,
+          tasks: todayTasks
         },
         upcomingTasks: {
-          count: upcomingTasksData.length,
-          tasks: limitedUpcomingTasks,
+          count: upcomingTasks.length,
+          tasks: upcomingTasks
         },
         overdueTasks: {
-          count: overdueTasksData.length,
-          tasks: overdueTasksData,
-        },
+          count: overdueTasks.length,
+          tasks: overdueTasks
+        }
       },
       pagination: {
         page: parseInt(page),
@@ -838,7 +780,44 @@ export const getMyTasks = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Error in getMyTasks:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+export const deleteTaskPermanently = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Check if task exists
+    const task = await Task.findById(id);
+    
+    if (!task) {
+      return res.status(404).json({
+        success: false,
+        message: "Task not found",
+      });
+    }
+
+    // Check if user has permission to delete
+    if (task.assignedTo.toString() !== req.user.id && req.user.role !== 'super_admin') {
+      return res.status(403).json({
+        success: false,
+        message: "You don't have permission to delete this task",
+      });
+    }
+
+    // Permanently delete the task
+    await Task.findByIdAndDelete(id);
+
+    res.status(200).json({
+      success: true,
+      message: "Task deleted permanently",
+    });
+
+  } catch (error) {
     res.status(500).json({
       success: false,
       message: error.message,
