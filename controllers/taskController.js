@@ -384,7 +384,79 @@ export const completeTask = async (req, res) => {
   }
 };
 
+export const carryForwardTasks = async (req, res) => {
+  try {
+    const { project, date, newDueDate } = req.body;
 
+    const targetDate = date ? new Date(date) : new Date();
+    targetDate.setHours(0, 0, 0, 0);
+
+    // Find all pending tasks for the specified date
+    const pendingTasks = await Task.find({
+      project,
+      status: { $in: ["pending", "in_progress", "overdue"] },
+      dueDate: {
+        $gte: targetDate,
+        $lt: new Date(targetDate.getTime() + 24 * 60 * 60 * 1000),
+      },
+    });
+
+    const carriedTasks = [];
+
+    // Carry forward each pending task
+    for (const task of pendingTasks) {
+      const carriedTask = await task.carryForward(
+        newDueDate || new Date(targetDate.getTime() + 24 * 60 * 60 * 1000),
+        task.priority,
+      );
+      carriedTasks.push(carriedTask);
+    }
+
+    // Update daily summary for carried forward tasks
+    const labourGroups = {};
+    pendingTasks.forEach((task) => {
+      task.assignedTo.forEach((labourId) => {
+        if (!labourGroups[labourId]) {
+          labourGroups[labourId] = {
+            tasks: [],
+            labourId,
+            project: task.project,
+          };
+        }
+        labourGroups[labourId].tasks.push(task);
+      });
+    });
+
+    for (const group of Object.values(labourGroups)) {
+      let dailySummary = await DailyTaskSummary.findOne({
+        labour: group.labourId,
+        project: group.project,
+        date: targetDate,
+      });
+
+      if (dailySummary) {
+        dailySummary.tasksCarriedForward += group.tasks.length;
+        dailySummary.carriedForwardTaskIds.push(
+          ...group.tasks.map((t) => t._id),
+        );
+        dailySummary.totalTasksOverdue += group.tasks.length;
+        dailySummary.overdueTaskIds.push(...group.tasks.map((t) => t._id));
+        await dailySummary.save();
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      message: `${carriedTasks.length} tasks carried forward successfully`,
+      data: carriedTasks,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
 
 export const getLabourTaskSummary = async (req, res) => {
   try {
@@ -554,6 +626,7 @@ export const triggerAutoCarryForward = async (req, res) => {
     });
   }
 };
+
 export const getMyTasks = async (req, res) => {
   try {
     const {
@@ -569,7 +642,7 @@ export const getMyTasks = async (req, res) => {
     } = req.query;
 
     const query = {
-      assignedTo: req.user.id, // Filter tasks assigned to current user
+      assignedTo: req.user.id, 
       isActive: true
     };
 
@@ -604,7 +677,7 @@ export const getMyTasks = async (req, res) => {
     // Get total count for pagination
     const total = await Task.countDocuments(query);
 
-    // Get statistics for the user
+    // Get statistics for the user - FIXED: Get all status counts
     const statistics = await Task.aggregate([
       {
         $match: {
@@ -620,7 +693,7 @@ export const getMyTasks = async (req, res) => {
       }
     ]);
 
-    // Format statistics
+    // Format statistics - FIXED: Properly map values
     const stats = {
       total: total,
       pending: 0,
@@ -630,18 +703,23 @@ export const getMyTasks = async (req, res) => {
       overdue: 0
     };
 
+    // Map aggregation results to stats object
     statistics.forEach(stat => {
-      stats[stat._id] = stat.count;
+      if (stat._id === 'pending') stats.pending = stat.count;
+      if (stat._id === 'in_progress') stats.in_progress = stat.count;
+      if (stat._id === 'completed') stats.completed = stat.count;
+      if (stat._id === 'carried_forward') stats.carried_forward = stat.count;
     });
 
-    // Get today's tasks
+    // Get today's date boundaries
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
 
-    const todayTasks = await Task.find({
+    // Get today's tasks (non-completed)
+    const todayTasksData = await Task.find({
       assignedTo: req.user.id,
       dueDate: {
         $gte: today,
@@ -651,13 +729,25 @@ export const getMyTasks = async (req, res) => {
       status: { $ne: 'completed' }
     })
     .populate("project", "projectName")
-    .sort({ priority: -1, dueDate: 1 });
+    .lean();
+
+    // Sort today's tasks by priority: critical → high → medium → low
+    const priorityOrder = { 'critical': 1, 'high': 2, 'medium': 3, 'low': 4 };
+    todayTasksData.sort((a, b) => {
+      const orderA = priorityOrder[a.priority] || 5;
+      const orderB = priorityOrder[b.priority] || 5;
+      if (orderA !== orderB) {
+        return orderA - orderB;
+      }
+      // If same priority, sort by dueDate
+      return new Date(a.dueDate) - new Date(b.dueDate);
+    });
 
     // Get upcoming tasks (next 7 days)
     const nextWeek = new Date(today);
     nextWeek.setDate(nextWeek.getDate() + 7);
 
-    const upcomingTasks = await Task.find({
+    const upcomingTasksData = await Task.find({
       assignedTo: req.user.id,
       dueDate: {
         $gt: tomorrow,
@@ -667,18 +757,51 @@ export const getMyTasks = async (req, res) => {
       status: { $ne: 'completed' }
     })
     .populate("project", "projectName")
-    .sort({ dueDate: 1 })
-    .limit(5);
+    .lean();
 
-    // Get overdue tasks
-    const overdueTasks = await Task.find({
+    // Sort upcoming tasks by dueDate first, then by priority
+    upcomingTasksData.sort((a, b) => {
+      // First sort by dueDate
+      const dateCompare = new Date(a.dueDate) - new Date(b.dueDate);
+      if (dateCompare !== 0) return dateCompare;
+      
+      // If same dueDate, sort by priority
+      const orderA = priorityOrder[a.priority] || 5;
+      const orderB = priorityOrder[b.priority] || 5;
+      return orderA - orderB;
+    });
+
+    // Limit to 5 tasks after sorting
+    const limitedUpcomingTasks = upcomingTasksData.slice(0, 5);
+
+    // Get overdue tasks - FIXED: Find tasks with due date before today that are not completed
+    const overdueTasksData = await Task.find({
       assignedTo: req.user.id,
       dueDate: { $lt: today },
-      status: { $in: ['pending', 'in_progress', 'overdue'] },
+      status: { $nin: ['completed'] },
       isActive: true
     })
     .populate("project", "projectName")
-    .sort({ dueDate: 1 });
+    .lean();
+
+    // Sort overdue tasks by dueDate first, then by priority
+    overdueTasksData.sort((a, b) => {
+      // First sort by dueDate
+      const dateCompare = new Date(a.dueDate) - new Date(b.dueDate);
+      if (dateCompare !== 0) return dateCompare;
+      
+      // If same dueDate, sort by priority
+      const orderA = priorityOrder[a.priority] || 5;
+      const orderB = priorityOrder[b.priority] || 5;
+      return orderA - orderB;
+    });
+
+    // Update overdue count in statistics
+    stats.overdue = overdueTasksData.length;
+
+    // For debugging - log the statistics
+    console.log('Statistics:', stats);
+    console.log('Overdue tasks count:', overdueTasksData.length);
 
     res.status(200).json({
       success: true,
@@ -686,16 +809,16 @@ export const getMyTasks = async (req, res) => {
         tasks,
         statistics: stats,
         todayTasks: {
-          count: todayTasks.length,
-          tasks: todayTasks
+          count: todayTasksData.length,
+          tasks: todayTasksData
         },
         upcomingTasks: {
-          count: upcomingTasks.length,
-          tasks: upcomingTasks
+          count: upcomingTasksData.length,
+          tasks: limitedUpcomingTasks
         },
         overdueTasks: {
-          count: overdueTasks.length,
-          tasks: overdueTasks
+          count: overdueTasksData.length,
+          tasks: overdueTasksData
         }
       },
       pagination: {
@@ -706,6 +829,7 @@ export const getMyTasks = async (req, res) => {
       },
     });
   } catch (error) {
+    console.error('Error in getMyTasks:', error);
     res.status(500).json({
       success: false,
       message: error.message,
