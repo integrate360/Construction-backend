@@ -24,6 +24,7 @@ import {
   getProjectAdvanceSummary,
   downloadSalarySlip,
   getProjectUsers,
+  getMyPayrolls,
 } from "../controllers/salaryController.js";
 import authMiddleware from "../middleware/authmiddleware.js";
 
@@ -43,6 +44,8 @@ router.put("/structure/:id", updateSalaryStructure);
 router.delete("/structure/:id", deleteSalaryStructure);
 
 router.get("/payroll", getAllPayrolls);
+
+router.get("/my-payrolls", getMyPayrolls);
 
 router.post("/payroll/generate", generatePayroll);
 

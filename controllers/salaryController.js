@@ -1517,3 +1517,103 @@ export const getProjectUsers = async (req, res) => {
     });
   }
 };
+
+export const getMyPayrolls = async (req, res) => {
+  try {
+    const {
+      project,
+      role,
+      paymentStatus,
+      search,
+      sortBy = "createdAt",
+      sortOrder = "desc",
+    } = req.query;
+
+    // Pagination
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    // Get the logged-in user's ID from the request (assuming it's set by auth middleware)
+    const userId = req.user._id;
+
+    // Base filter for the logged-in user
+    const filter = { user: userId };
+    
+    // Add optional filters
+    if (project) filter.project = project;
+    if (role) filter.role = role;
+    if (paymentStatus) filter.paymentStatus = paymentStatus;
+
+    // Search by project name or remarks (user search removed since we're filtering by specific user)
+    if (search) {
+      const ProjectModel = mongoose.model("Project");
+      const matchingProjects = await ProjectModel.find({
+        $or: [
+          { projectName: { $regex: search, $options: "i" } },
+          { siteName: { $regex: search, $options: "i" } },
+        ],
+      }).select("_id");
+      const projectIds = matchingProjects.map((p) => p._id);
+
+      filter.$or = [
+        { project: { $in: projectIds } },
+        { remarks: { $regex: search, $options: "i" } },
+        { transactionReference: { $regex: search, $options: "i" } },
+      ];
+    }
+
+    // Sort
+    const sortOptions = {};
+    sortOptions[sortBy] = sortOrder === "asc" ? 1 : -1;
+
+    // Count total documents for pagination
+    const totalDocuments = await Payroll.countDocuments(filter);
+
+    const payrolls = await Payroll.find(filter)
+      .populate({
+        path: "user",
+        select: "name email role phoneNumber profilePicture adharNumber",
+      })
+      .populate({
+        path: "project",
+        select: "projectName siteName location client site_manager",
+        populate: [
+          { path: "client", select: "name email phoneNumber" },
+          { path: "site_manager", select: "name email phoneNumber" },
+        ],
+      })
+      .populate({
+        path: "salaryStructure",
+        select: "salaryType rateAmount overtimeRate",
+      })
+      .populate("createdBy", "name email role")
+      .sort(sortOptions)
+      .skip(skip)
+      .limit(limit);
+
+    // Build summary for user's payrolls
+    const summary = {
+      totalPayrolls: payrolls.length,
+      totalNetSalary: payrolls.reduce((sum, p) => sum + p.netSalary, 0),
+      totalGrossSalary: payrolls.reduce((sum, p) => sum + p.grossSalary, 0),
+      totalPaid: payrolls.filter((p) => p.paymentStatus === "paid").length,
+      totalPending: payrolls.filter((p) => p.paymentStatus === "pending").length,
+      totalPartiallyPaid: payrolls.filter(
+        (p) => p.paymentStatus === "partially_paid",
+      ).length,
+    };
+
+    res.status(200).json({
+      success: true,
+      count: payrolls.length,
+      totalDocuments,
+      currentPage: page,
+      totalPages: Math.ceil(totalDocuments / limit),
+      summary,
+      data: payrolls,
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
