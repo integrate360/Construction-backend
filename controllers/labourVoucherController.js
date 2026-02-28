@@ -84,52 +84,102 @@ export const getAllLabourVouchers = async (req, res) => {
       status,
       project,
       user,
-      startDate,
-      endDate,
       paymentMode,
-      search,
     } = req.query;
 
     const filter = {};
 
+    // Role-based filtering
     if (req.user.role === "site_manager") {
-      // Site managers can only see vouchers for their projects
       const managedProjects = await Project.find({
         site_manager: req.user.id,
       }).select("_id");
-      filter.project = { $in: managedProjects.map((p) => p._id) };
+
+      if (managedProjects.length > 0) {
+        filter.project = { $in: managedProjects.map((p) => p._id) };
+      } else {
+        return res.status(200).json({
+          success: true,
+          count: 0,
+          total: 0,
+          page: parseInt(page),
+          pages: 0,
+          data: [],
+        });
+      }
     } else if (req.user.role === "labour") {
       filter.user = req.user.id;
     }
-    if (status) filter.status = status;
-    if (project) filter.project = project;
-    if (user) filter.user = user;
-    if (paymentMode) filter.paymentMode = paymentMode;
+
+    // Apply filters
+    if (status) {
+      filter.status = status;
+    }
+
+    if (project) {
+      filter.project = project;
+    }
+
+    if (user) {
+      filter.user = user;
+    }
+
+    if (paymentMode) {
+      filter.paymentMode = paymentMode;
+    }
 
     // Pagination
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const skip = (pageNum - 1) * limitNum;
 
-    // Execute query
+    // Query
     const labourVouchers = await LabourVoucher.find(filter)
       .populate("user", "name email phoneNumber role")
       .populate("project", "projectName siteName")
       .populate("createdBy", "name email role")
       .sort({ createdAt: -1 })
       .skip(skip)
-      .limit(parseInt(limit));
+      .limit(limitNum);
 
-    // Get total count
     const total = await LabourVoucher.countDocuments(filter);
+
+    // Summary
+    const summary = await LabourVoucher.aggregate([
+      { $match: filter },
+      {
+        $group: {
+          _id: null,
+          totalAmount: { $sum: "$paidAmount" },
+          avgAmount: { $avg: "$paidAmount" },
+          maxAmount: { $max: "$paidAmount" },
+          minAmount: { $min: "$paidAmount" },
+        },
+      },
+    ]);
 
     res.status(200).json({
       success: true,
       count: labourVouchers.length,
       total,
-      page: parseInt(page),
-      pages: Math.ceil(total / parseInt(limit)),
+      page: pageNum,
+      pages: Math.ceil(total / limitNum),
+      summary: {
+        totalAmount: summary[0]?.totalAmount || 0,
+        avgAmount: summary[0]?.avgAmount || 0,
+        maxAmount: summary[0]?.maxAmount || 0,
+        minAmount: summary[0]?.minAmount || 0,
+      },
+      filters: {
+        status: status || null,
+        project: project || null,
+        user: user || null,
+        paymentMode: paymentMode || null,
+      },
       data: labourVouchers,
     });
   } catch (error) {
+    console.error("Error in getAllLabourVouchers:", error);
     res.status(500).json({
       success: false,
       message: "Error fetching labour vouchers",
