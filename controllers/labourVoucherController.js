@@ -6,7 +6,6 @@ import mongoose from "mongoose";
 export const createLabourVoucher = async (req, res) => {
   try {
     const {
-      voucher,
       project,
       paidAmount,
       paymentMode,
@@ -47,14 +46,9 @@ export const createLabourVoucher = async (req, res) => {
         message: "Selected user is not a labour",
       });
     }
-    let voucherNumber = voucher;
-    if (!voucherNumber) {
-      const count = (await LabourVoucher.countDocuments()) + 1;
-      voucherNumber = `LV-${new Date().getFullYear()}-${String(count).padStart(6, "0")}`;
-    }
+
 
     const labourVoucher = await LabourVoucher.create({
-      voucher: voucherNumber,
       user: labourUser._id,
       project: projectExists._id,
       paidAmount,
@@ -111,14 +105,6 @@ export const getAllLabourVouchers = async (req, res) => {
     if (project) filter.project = project;
     if (user) filter.user = user;
     if (paymentMode) filter.paymentMode = paymentMode;
-
-    // Search by voucher number or remarks
-    if (search) {
-      filter.$or = [
-        { voucher: { $regex: search, $options: "i" } },
-        { remarks: { $regex: search, $options: "i" } },
-      ];
-    }
 
     // Pagination
     const skip = (parseInt(page) - 1) * parseInt(limit);

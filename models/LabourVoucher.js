@@ -2,10 +2,6 @@
 
     const labourVoucherSchema = new mongoose.Schema(
     {
-        voucher: {
-        type: String,
-        },
-
         user: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "User",
