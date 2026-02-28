@@ -174,11 +174,12 @@ export const getTasks = async (req, res) => {
       toDate,
       page = 1,
       limit = 10,
+      search, // <-- NEW SEARCH PARAM
     } = req.query;
 
     const query = {};
 
-    // Apply filters
+    // Apply direct filters
     if (status) query.status = status;
     if (priority) query.priority = priority;
     if (project) query.project = project;
@@ -191,17 +192,42 @@ export const getTasks = async (req, res) => {
       if (toDate) query.dueDate.$lte = new Date(toDate);
     }
 
+    // -----------------------------------------
+    // 🔍 SEARCH BY NAME (task, user, project)
+    // -----------------------------------------
+    if (search) {
+      const searchRegex = new RegExp(search, "i");
+
+      // Find matching users
+      const matchedUsers = await User.find({
+        name: searchRegex,
+      }).distinct("_id");
+
+      // Find matching projects
+      const matchedProjects = await Project.find({
+        $or: [{ projectName: searchRegex }, { siteName: searchRegex }],
+      }).distinct("_id");
+
+      // Search conditions for title or relations
+      query.$or = [
+        { title: searchRegex }, // task title
+        { assignedTo: { $in: matchedUsers } },
+        { project: { $in: matchedProjects } },
+      ];
+    }
+
+    // -----------------------------------------
     // Role-based filtering
+    // -----------------------------------------
     if (req.user.role === "labour") {
       query.assignedTo = req.user.id;
     } else if (req.user.role === "site_manager") {
-      // Get projects managed by this site manager
       const projects = await Project.find({
         site_manager: req.user.id,
       }).distinct("_id");
+
       query.project = { $in: projects };
     }
-    // Super admin can see all tasks
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
@@ -375,7 +401,6 @@ export const completeTask = async (req, res) => {
       message: "Task marked as completed",
       data: task,
     });
-
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -627,7 +652,6 @@ export const triggerAutoCarryForward = async (req, res) => {
   }
 };
 
-
 // Priority order map
 const priorityOrder = {
   critical: 1,
@@ -706,7 +730,7 @@ export const deleteTaskPermanently = async (req, res) => {
 
     // Check if task exists
     const task = await Task.findById(id);
-    
+
     if (!task) {
       return res.status(404).json({
         success: false,
@@ -715,7 +739,10 @@ export const deleteTaskPermanently = async (req, res) => {
     }
 
     // Check if user has permission to delete
-    if (task.assignedTo.toString() !== req.user.id && req.user.role !== 'super_admin') {
+    if (
+      task.assignedTo.toString() !== req.user.id &&
+      req.user.role !== "super_admin"
+    ) {
       return res.status(403).json({
         success: false,
         message: "You don't have permission to delete this task",
@@ -729,7 +756,6 @@ export const deleteTaskPermanently = async (req, res) => {
       success: true,
       message: "Task deleted permanently",
     });
-
   } catch (error) {
     res.status(500).json({
       success: false,
