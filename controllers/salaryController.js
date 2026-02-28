@@ -1602,3 +1602,224 @@ export const previewSalary = async (req, res) => {
     });
   }
 };
+
+export const getMyPayrolls = async (req, res) => {
+  try {
+    const {
+      project,
+      role,
+      paymentStatus,
+      search,
+      sortBy = "createdAt",
+      sortOrder = "desc",
+    } = req.query;
+
+    // Pagination
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    // Get the logged-in user's ID from the request (assuming it's set by auth middleware)
+    const userId = req.user._id;
+
+    // Base filter for the logged-in user
+    const filter = { user: userId };
+    
+    // Add optional filters
+    if (project) filter.project = project;
+    if (role) filter.role = role;
+    if (paymentStatus) filter.paymentStatus = paymentStatus;
+
+    // Search by project name or remarks (user search removed since we're filtering by specific user)
+    if (search) {
+      const ProjectModel = mongoose.model("Project");
+      const matchingProjects = await ProjectModel.find({
+        $or: [
+          { projectName: { $regex: search, $options: "i" } },
+          { siteName: { $regex: search, $options: "i" } },
+        ],
+      }).select("_id");
+      const projectIds = matchingProjects.map((p) => p._id);
+
+      filter.$or = [
+        { project: { $in: projectIds } },
+        { remarks: { $regex: search, $options: "i" } },
+        { transactionReference: { $regex: search, $options: "i" } },
+      ];
+    }
+
+    // Sort
+    const sortOptions = {};
+    sortOptions[sortBy] = sortOrder === "asc" ? 1 : -1;
+
+    // Count total documents for pagination
+    const totalDocuments = await Payroll.countDocuments(filter);
+
+    const payrolls = await Payroll.find(filter)
+      .populate({
+        path: "user",
+        select: "name email role phoneNumber profilePicture adharNumber",
+      })
+      .populate({
+        path: "project",
+        select: "projectName siteName location client site_manager",
+        populate: [
+          { path: "client", select: "name email phoneNumber" },
+          { path: "site_manager", select: "name email phoneNumber" },
+        ],
+      })
+      .populate({
+        path: "salaryStructure",
+        select: "salaryType rateAmount overtimeRate",
+      })
+      .populate("createdBy", "name email role")
+      .sort(sortOptions)
+      .skip(skip)
+      .limit(limit);
+
+    // Build summary for user's payrolls
+    const summary = {
+      totalPayrolls: payrolls.length,
+      totalNetSalary: payrolls.reduce((sum, p) => sum + p.netSalary, 0),
+      totalGrossSalary: payrolls.reduce((sum, p) => sum + p.grossSalary, 0),
+      totalPaid: payrolls.filter((p) => p.paymentStatus === "paid").length,
+      totalPending: payrolls.filter((p) => p.paymentStatus === "pending").length,
+      totalPartiallyPaid: payrolls.filter(
+        (p) => p.paymentStatus === "partially_paid",
+      ).length,
+    };
+
+    res.status(200).json({
+      success: true,
+      count: payrolls.length,
+      totalDocuments,
+      currentPage: page,
+      totalPages: Math.ceil(totalDocuments / limit),
+      summary,
+      data: payrolls,
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+export const getMyAdvances = async (req, res) => {
+  try {
+    const {
+      project,
+      recoveryStatus,
+      search,
+      sortBy = "givenDate",
+      sortOrder = "desc",
+    } = req.query;
+
+    // Pagination
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    // Get the logged-in user's ID from the request
+    const userId = req.user._id;
+
+    // Base filter for the logged-in user
+    const filter = { user: userId };
+    
+    // Add optional filters
+    if (project) filter.project = project;
+    if (recoveryStatus) filter.recoveryStatus = recoveryStatus;
+
+    // Search by project name or reason (user search removed since we're filtering by specific user)
+    if (search) {
+      const ProjectModel = mongoose.model("Project");
+      const matchingProjects = await ProjectModel.find({
+        $or: [
+          { projectName: { $regex: search, $options: "i" } },
+          { siteName: { $regex: search, $options: "i" } },
+        ],
+      }).select("_id");
+      const projectIds = matchingProjects.map((p) => p._id);
+
+      filter.$or = [
+        { project: { $in: projectIds } },
+        { reason: { $regex: search, $options: "i" } },
+      ];
+    }
+
+    // Sort
+    const sortOptions = {};
+    sortOptions[sortBy] = sortOrder === "asc" ? 1 : -1;
+
+    const totalDocuments = await Advance.countDocuments(filter);
+
+    const advances = await Advance.find(filter)
+      .populate({
+        path: "user",
+        select: "name email role phoneNumber profilePicture adharNumber isActive",
+      })
+      .populate({
+        path: "project",
+        select: "projectName siteName location client site_manager",
+        populate: [
+          { path: "client", select: "name email" },
+          { path: "site_manager", select: "name email" },
+        ],
+      })
+      .populate("createdBy", "name email role")
+      .sort(sortOptions)
+      .skip(skip)
+      .limit(limit);
+
+    // Calculate summary for user's advances
+    const summary = {
+      totalAdvances: advances.length,
+      totalAmount: advances.reduce((sum, a) => sum + a.amount, 0),
+      totalRecovered: advances.reduce((sum, a) => sum + a.amountRecovered, 0),
+      totalPending: advances.reduce(
+        (sum, a) => sum + (a.amount - a.amountRecovered),
+        0,
+      ),
+      byStatus: {
+        pending: advances.filter((a) => a.recoveryStatus === "pending").length,
+        partially_recovered: advances.filter(
+          (a) => a.recoveryStatus === "partially_recovered",
+        ).length,
+        recovered: advances.filter((a) => a.recoveryStatus === "recovered")
+          .length,
+      },
+    };
+
+    // Get additional stats for the user
+    const currentMonth = new Date();
+    const startOfMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1);
+    const endOfMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0);
+
+    // Monthly summary
+    const monthlyAdvances = advances.filter(a => {
+      const givenDate = new Date(a.givenDate);
+      return givenDate >= startOfMonth && givenDate <= endOfMonth;
+    });
+
+    const monthlySummary = {
+      totalAdvances: monthlyAdvances.length,
+      totalAmount: monthlyAdvances.reduce((sum, a) => sum + a.amount, 0),
+      totalRecovered: monthlyAdvances.reduce((sum, a) => sum + a.amountRecovered, 0),
+      totalPending: monthlyAdvances.reduce(
+        (sum, a) => sum + (a.amount - a.amountRecovered),
+        0,
+      ),
+    };
+
+    res.status(200).json({
+      success: true,
+      count: advances.length,
+      totalDocuments,
+      currentPage: page,
+      totalPages: Math.ceil(totalDocuments / limit),
+      summary,
+      monthlySummary,
+      data: advances,
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};

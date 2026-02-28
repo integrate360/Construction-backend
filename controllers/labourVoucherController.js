@@ -1,18 +1,12 @@
-import  LabourVoucher  from "../models/LabourVoucher.js";
+import LabourVoucher from "../models/LabourVoucher.js";
 import Project from "../models/Project.js";
 import User from "../models/User.js";
 import mongoose from "mongoose";
 
 export const createLabourVoucher = async (req, res) => {
   try {
-    const {
-      project,
-      paidAmount,
-      paymentMode,
-      paymentDate,
-      remarks,
-      user,
-    } = req.body;
+    const { project, paidAmount, paymentMode, paymentDate, remarks, user } =
+      req.body;
 
     const projectExists = await Project.findById(project);
     if (!projectExists) {
@@ -46,7 +40,6 @@ export const createLabourVoucher = async (req, res) => {
         message: "Selected user is not a labour",
       });
     }
-
 
     const labourVoucher = await LabourVoucher.create({
       user: labourUser._id,
@@ -592,3 +585,84 @@ export const getVouchersByUser = async (req, res) => {
   }
 };
 
+export const getMyVouchers = async (req, res) => {
+  try {
+    const { page = 1, limit = 10 } = req.query;
+    
+    // Get the logged-in user's ID from the request
+    const userId = req.user._id;
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    const vouchers = await LabourVoucher.find({ user: userId })
+      .populate("project", "projectName siteName")
+      .populate("createdBy", "name email")
+      .sort({ paymentDate: -1 })
+      .skip(skip)
+      .limit(parseInt(limit));
+
+    const total = await LabourVoucher.countDocuments({ user: userId });
+
+    // Calculate user total for all their vouchers
+    const userTotal = await LabourVoucher.aggregate([
+      { $match: { user: new mongoose.Types.ObjectId(userId) } },
+      { $group: { _id: null, total: { $sum: "$paidAmount" } } },
+    ]);
+
+    // Get additional stats for the user
+    const currentMonth = new Date();
+    const startOfMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1);
+    const endOfMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0);
+
+    const monthlyTotal = await LabourVoucher.aggregate([
+      { 
+        $match: { 
+          user: new mongoose.Types.ObjectId(userId),
+          paymentDate: { $gte: startOfMonth, $lte: endOfMonth }
+        } 
+      },
+      { $group: { _id: null, total: { $sum: "$paidAmount" } } },
+    ]);
+
+    // Group by payment status
+    const statusCounts = await LabourVoucher.aggregate([
+      { $match: { user: new mongoose.Types.ObjectId(userId) } },
+      { 
+        $group: { 
+          _id: "$paymentStatus", 
+          count: { $sum: 1 },
+          total: { $sum: "$paidAmount" }
+        } 
+      },
+    ]);
+
+    // Format status counts
+    const paymentStats = {};
+    statusCounts.forEach(stat => {
+      paymentStats[stat._id] = {
+        count: stat.count,
+        total: stat.total
+      };
+    });
+
+    res.status(200).json({
+      success: true,
+      count: vouchers.length,
+      total,
+      page: parseInt(page),
+      pages: Math.ceil(total / parseInt(limit)),
+      summary: {
+        lifetimeTotal: userTotal[0]?.total || 0,
+        monthlyTotal: monthlyTotal[0]?.total || 0,
+        paymentStats
+      },
+      data: vouchers,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Error fetching your vouchers",
+      error: error.message,
+    });
+  }
+};

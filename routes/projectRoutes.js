@@ -24,6 +24,7 @@ router.put("/updateProject/:id", updateProject);
 router.get("/getProjectStats/stats", getProjectStats);
 router.get("/getProjectById/:id", getProjectById);
 router.delete("/deleteProject/:id", deleteProject);
+
 router.post("/addProjectAttributes/:id", addProjectAttributes);
 router.put(
   "/updateAttributeQuantity/:projectId/:attributeId",

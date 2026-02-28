@@ -8,6 +8,7 @@ import {
   getLabourVoucherStats,
   getVouchersByProject,
   getVouchersByUser,
+  getMyVouchers,
 } from "../controllers/labourVoucherController.js";
 import authMiddleware from "../middleware/authmiddleware.js";
 
@@ -39,5 +40,8 @@ router.get("/by-project/:projectId", getVouchersByProject);
 
 // By user
 router.get("/getVouchersByUser/:userId", getVouchersByUser);
+
+
+router.get('/getMyVouchers', authMiddleware, getMyVouchers);
 
 export default router;
